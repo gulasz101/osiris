@@ -33,9 +33,16 @@ Read this whole file at the start of every run. It is short on purpose.
   must still pass), write what is missing and why in an issue comment, set the issue `blocked`.
 
 ## Docs first (docs-mcp), then Firecrawl
-Before you write code against a library, search it in docs-mcp (`mcp__docs__search_docs`, or the
-`docs-search` skill). Use these versions: they are the ones in `Cargo.lock`. Never guess an API
-from memory; these crates change between versions.
+**Rule: when you are not sure, look it up. Do not assume.** This is not only for new code. It is
+also for errors you do not understand, a browser API (IndexedDB, File API, WebGPU, fetch), a build
+or test failure, a wasm-bindgen or web-sys signature, or a tool flag. Each time:
+1. `mcp__docs__search_docs` (or the `docs-search` skill) with the library from the table below.
+2. Nothing useful? Use the `web-search` skill (our Firecrawl) with the exact error message.
+3. Still nothing? Write in the issue comment what you looked up and that you are guessing.
+
+Before you write code against a library, search it in docs-mcp. Use these versions: they are the
+ones in `Cargo.lock`. Never guess an API from memory; these crates change between versions.
+The hourly check counts your docs lookups. A run with code changes and zero lookups gets flagged.
 
 | Crate / topic | Version | docs-mcp library |
 |---|---|---|

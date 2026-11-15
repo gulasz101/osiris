@@ -1,7 +1,7 @@
 # web-vfs Specification
 
 ## Purpose
-TBD - created by archiving change web-vfs-core. Update Purpose after archive.
+Provide a single file access layer (`osiris_vfs`) that uses `std::fs` on desktop and an in-memory store in the browser, so no crate other than `osiris-app` calls `std::fs` directly.
 
 ## Requirements
 

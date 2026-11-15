@@ -1,6 +1,11 @@
 // Release builds on Windows run without a console window.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
+#[cfg(target_arch = "wasm32")]
+mod web;
+
 mod advisors;
 mod anims;
 mod popup;
@@ -1920,6 +1925,15 @@ fn init_logging(headless: bool) {
     }));
 }
 
+/// In the browser `main` only prepares the page; the game starts when the player has handed over
+/// the game folder (see web.rs).
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    web::init();
+    log::info!("osiris web: ready");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<()> {
     let args = parse_args()?;
     let headless = args.screenshot.is_some();

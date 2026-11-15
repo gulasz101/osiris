@@ -599,7 +599,7 @@ impl Editor {
     /// foreign, with its place and goods; every route cleared.
     fn reset_kingdom(&mut self) {
         let path = self.data.join("Pharaoh2.emp");
-        let objects = std::fs::read(&path).map_err(anyhow::Error::from).and_then(|d| empire::Empire::default_objects(&d).map_err(anyhow::Error::from));
+        let objects = osiris_vfs::read(&path).map_err(anyhow::Error::from).and_then(|d| empire::Empire::default_objects(&d).map_err(anyhow::Error::from));
         match objects {
             Ok(objects) => {
                 let e = &mut self.scenario.empire;

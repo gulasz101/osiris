@@ -71,7 +71,7 @@ fn point(s: &str) -> Result<(i32, i32)> {
 /// The map named `name`: a path, or a name in the game's Maps folder.
 pub fn map_path(data: &Path, name: &str) -> PathBuf {
     let p = PathBuf::from(name);
-    if p.exists() {
+    if osiris_vfs::exists(&p) {
         return p;
     }
     let file = if name.to_ascii_lowercase().ends_with(".map") { name.to_owned() } else { format!("{name}.map") };

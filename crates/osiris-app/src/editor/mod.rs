@@ -244,7 +244,7 @@ fn start_offset(width: i32, height: i32) -> i32 {
 impl Editor {
     /// Opens the map at `path` for editing.
     pub fn open(path: &Path, defs: Arc<Defs>, text: Arc<TextTable>, maps_dir: PathBuf) -> Result<Self> {
-        let bytes = std::fs::read(path).with_context(|| path.display().to_string())?;
+        let bytes = osiris_vfs::read(path).with_context(|| path.display().to_string())?;
         let template = ChunkFile::parse(&bytes, Layout::Map)?;
         let mut scenario = Scenario::from_chunks(&template)?;
         scenario.fix_image_ids(0);
@@ -613,9 +613,9 @@ impl Editor {
     /// Saves the map to `path`, which becomes where Save writes.
     pub fn save_as(&mut self, path: &Path) -> Result<()> {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            osiris_vfs::create_dir_all(dir)?;
         }
-        std::fs::write(path, self.to_bytes()?).with_context(|| path.display().to_string())?;
+        osiris_vfs::write(path, self.to_bytes()?).with_context(|| path.display().to_string())?;
         self.path = Some(path.to_owned());
         self.name = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
         self.dirty = false;
@@ -630,8 +630,8 @@ impl Editor {
     /// The map written where the test game reads it, which the app then plays.
     pub fn play(&mut self) -> Result<()> {
         let path = self.maps_dir.join("_playtest.map");
-        std::fs::create_dir_all(&self.maps_dir)?;
-        std::fs::write(&path, self.to_bytes()?)?;
+        osiris_vfs::create_dir_all(&self.maps_dir)?;
+        osiris_vfs::write(&path, self.to_bytes()?)?;
         self.request = Some(Request::Play(path));
         Ok(())
     }

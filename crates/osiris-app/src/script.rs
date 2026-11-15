@@ -141,10 +141,10 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
             // Load Saved Game finds it.
             ["save", name @ ..] if !name.is_empty() => {
                 let dir = crate::player_saves_dir();
-                std::fs::create_dir_all(&dir)?;
+                osiris_vfs::create_dir_all(&dir)?;
                 let path = dir.join(format!("{}.osiris", crate::sanitize(&name.join(" "))));
                 let bytes = world.save().map_err(anyhow::Error::msg)?;
-                std::fs::write(&path, &bytes)?;
+                osiris_vfs::write(&path, &bytes)?;
                 eprintln!("saved {} ({} bytes)", path.display(), bytes.len());
             }
             // Lets every building type be built (but for earlier builds' types, which a
@@ -815,7 +815,7 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
             // Replaces the city with the saved game at PATH (spaces allowed), to look
             // into a player's save.
             ["loadfile", path @ ..] => {
-                let bytes = std::fs::read(path.join(" "))?;
+                let bytes = osiris_vfs::read(path.join(" "))?;
                 let mut loaded = World::load(&bytes, world.defs.clone(), world.balance.clone()).map_err(anyhow::Error::msg)?;
                 if let Some(b) = world.balances.clone() {
                     loaded.attach_balances(b);
@@ -1348,7 +1348,7 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
     if let Some(path) = record_to {
         let replay = world.replay().context("recording")?;
         replay.write(&path).map_err(anyhow::Error::msg)?;
-        let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+        let size = osiris_vfs::len(&path).unwrap_or(0);
         eprintln!("recorded {} commands, {} months, {} ticks to {} ({size} bytes)", replay.events.len(), replay.checkpoints.len(), replay.end_tick, path.display());
     }
     Ok(view)

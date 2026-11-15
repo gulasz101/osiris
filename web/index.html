@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Osiris: Pharaoh in your browser</title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; font-family: sans-serif; background: #1a1a2e; color: #eee; }
+        #start {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; min-height: 100vh; gap: 1em; text-align: center;
+        }
+        h1 { font-size: 1.8rem; }
+        p { max-width: 40ch; opacity: 0.85; }
+        #status { margin-top: 1em; color: #ffd700; min-height: 1.5em; }
+    </style>
+</head>
+<body>
+    <canvas id="osiris" hidden></canvas>
+    <div id="start">
+        <h1>Osiris: Pharaoh in your browser</h1>
+        <p>Choose the folder where Pharaoh is installed. The files stay on your computer; nothing is uploaded.</p>
+        <input type="file" id="folder" webkitdirectory multiple />
+        <p id="status"></p>
+    </div>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

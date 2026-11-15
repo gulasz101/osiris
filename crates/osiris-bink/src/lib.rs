@@ -20,8 +20,7 @@ mod bits;
 mod tables;
 mod video;
 
-use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 pub use video::Plane;
@@ -101,9 +100,9 @@ pub struct Movie<R> {
     packet: Vec<u8>,
 }
 
-impl Movie<BufReader<File>> {
+impl Movie<osiris_vfs::Reader> {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Movie::new(BufReader::new(File::open(path)?))
+        Movie::new(osiris_vfs::open(path)?)
     }
 }
 

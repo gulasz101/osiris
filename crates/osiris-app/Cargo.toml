@@ -16,6 +16,7 @@ osiris-sim = { path = "../osiris-sim" }
 osiris-ui = { path = "../osiris-ui" }
 osiris-audio = { path = "../osiris-audio" }
 osiris-bink = { path = "../osiris-bink" }
+osiris-vfs = { path = "../osiris-vfs" }
 wgpu = "30"
 winit = "0.30"
 pollster = "1"

@@ -120,7 +120,7 @@ impl Movie {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Movie {
-    fn run(name: &str, mut movie: osiris_bink::Movie<std::io::BufReader<std::fs::File>>, sound: Option<StreamSound>) -> Movie {
+    fn run(name: &str, mut movie: osiris_bink::Movie<osiris_vfs::Reader>, sound: Option<StreamSound>) -> Movie {
         let (width, height, fps, frames) = (movie.width(), movie.height(), movie.fps(), movie.frames() as usize);
         let (tx, rx) = sync_channel(AHEAD);
         let feed = sound.as_ref().map(|s| s.feed());

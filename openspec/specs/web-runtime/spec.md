@@ -1,7 +1,7 @@
 # web-runtime Specification
 
 ## Purpose
-TBD - created by archiving change web-time-threads. Update Purpose after archive.
+Ensures osiris-app and osiris-ui use platform-agnostic time (web_time) and avoid std::thread in the browser.
 
 ## Requirements
 

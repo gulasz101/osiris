@@ -38,6 +38,7 @@ mod widgets;
 use crate::lang::{tr, trf};
 use anyhow::{Context, Result, bail};
 use osiris_formats::{Campaign, ImageLibrary, MessageTable, MissionPak, Scenario, TextTable};
+use osiris_vfs;
 use osiris_sim::{Balance, Defs, World};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -113,6 +114,7 @@ fn parse_args() -> Result<Args> {
 
 /// Where Osiris keeps saves and campaign progress: the platform's usual place for
 /// application data.
+#[cfg(not(target_arch = "wasm32"))]
 fn user_dir() -> PathBuf {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let home = || env("HOME").unwrap_or_else(|| PathBuf::from("."));
@@ -123,8 +125,15 @@ fn user_dir() -> PathBuf {
     } else {
         env("XDG_DATA_HOME").unwrap_or_else(|| home().join(".local/share")).join("osiris")
     };
-    let _ = std::fs::create_dir_all(dir.join("saves"));
+    let _ = osiris_vfs::create_dir_all(dir.join("saves"));
     dir
+}
+
+/// In the browser saves and settings live in memory under /user (kept across page loads by a
+/// later change).
+#[cfg(target_arch = "wasm32")]
+fn user_dir() -> PathBuf {
+    PathBuf::from("/user")
 }
 
 /// Everything loaded once at startup and shared by every game.
@@ -163,17 +172,24 @@ fn new_world(assets: &Assets, source: &Source, difficulty: u8) -> Result<World> 
 
 /// Saved games, the last written first, so Continue picks up the latest.
 fn newest_first(mut v: Vec<PathBuf>) -> Vec<PathBuf> {
-    let written = |p: &PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let written = |p: &PathBuf| osiris_vfs::modified(p).ok();
     v.sort_by_key(|p| std::cmp::Reverse(written(p)));
     v
 }
 
 fn list_files(dir: &Path, ext: &str) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+    let mut v: Vec<PathBuf> = osiris_vfs::read_dir(dir)
         .map(|rd| {
-            rd.filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)))
-                .filter(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('_')))
+            rd.into_iter()
+                .filter(|e| !e.is_dir)
+                .filter_map(|e| {
+                    let p = e.path_buf();
+                    (
+                        p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext))
+                            && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('_')),
+                    )
+                        .0.then(|| p)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -192,27 +208,27 @@ fn rules_path() -> PathBuf {
 
 /// The player's game rules, applied to every game.
 fn load_rules() -> osiris_sim::Rules {
-    std::fs::read_to_string(rules_path()).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
+    osiris_vfs::read_to_string(rules_path()).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
 }
 
 /// The difficulty new games start at, which the player last chose (the original
 /// keeps it in Pharaoh.inf).
 fn load_difficulty() -> u8 {
-    std::fs::read_to_string(user_dir().join("difficulty.txt")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(osiris_sim::difficulty::NORMAL).min(osiris_sim::difficulty::IMPOSSIBLE)
+    osiris_vfs::read_to_string(user_dir().join("difficulty.txt")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(osiris_sim::difficulty::NORMAL).min(osiris_sim::difficulty::IMPOSSIBLE)
 }
 
 /// Whether the city is saved automatically each month (the original's Autosave
 /// option, on unless the player turned it off).
 fn load_autosave() -> bool {
-    std::fs::read_to_string(user_dir().join("autosave.txt")).map_or(true, |s| s.trim() != "off")
+    osiris_vfs::read_to_string(user_dir().join("autosave.txt")).map_or(true, |s| s.trim() != "off")
 }
 
 fn save_autosave(on: bool) {
-    let _ = std::fs::write(user_dir().join("autosave.txt"), if on { "on\n" } else { "off\n" });
+    let _ = osiris_vfs::write(user_dir().join("autosave.txt"), if on { "on\n" } else { "off\n" });
 }
 
 fn save_difficulty(d: u8) {
-    let _ = std::fs::write(user_dir().join("difficulty.txt"), format!("{d}\n"));
+    let _ = osiris_vfs::write(user_dir().join("difficulty.txt"), format!("{d}\n"));
 }
 
 /// The interface's own design size (see sidebar.rs, top_menu.rs, menu.rs): below
@@ -229,7 +245,7 @@ fn window_state_path() -> PathBuf {
 /// and whether it was full screen. `None` on a fresh install, or if the file is
 /// unreadable.
 fn load_window_state() -> Option<((u32, u32), bool, bool)> {
-    let s = std::fs::read_to_string(window_state_path()).ok()?;
+    let s = osiris_vfs::read_to_string(window_state_path()).ok()?;
     let mut it = s.split_whitespace();
     let w: u32 = it.next()?.parse().ok()?;
     let h: u32 = it.next()?.parse().ok()?;
@@ -239,7 +255,7 @@ fn load_window_state() -> Option<((u32, u32), bool, bool)> {
 }
 
 fn save_window_state(size: (u32, u32), maximized: bool, fullscreen: bool) {
-    let _ = std::fs::write(window_state_path(), format!("{} {} {} {}\n", size.0, size.1, maximized as u8, fullscreen as u8));
+    let _ = osiris_vfs::write(window_state_path(), format!("{} {} {} {}\n", size.0, size.1, maximized as u8, fullscreen as u8));
 }
 
 /// `size` clamped to fit the event loop's primary monitor (its own logical size),
@@ -263,7 +279,7 @@ fn default_window_size(event_loop: &ActiveEventLoop) -> (u32, u32) {
 
 fn save_rules(rules: &osiris_sim::Rules) {
     if let Ok(s) = toml::to_string(rules) {
-        let _ = std::fs::write(rules_path(), s);
+        let _ = osiris_vfs::write(rules_path(), s);
     }
 }
 
@@ -308,7 +324,7 @@ pub fn player_saves_dir() -> PathBuf {
 /// A family folder's exact display name, read back from its `name.txt`, falling
 /// back to the folder name itself if that's missing.
 fn family_display_name(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join("name.txt"))
+    osiris_vfs::read_to_string(dir.join("name.txt"))
         .ok()
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
@@ -317,8 +333,8 @@ fn family_display_name(dir: &Path) -> String {
 
 /// Every family in the registry, alphabetically.
 pub fn list_families() -> Vec<String> {
-    let mut v: Vec<String> = std::fs::read_dir(families_dir())
-        .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).map(|e| family_display_name(&e.path())).collect())
+    let mut v: Vec<String> = osiris_vfs::read_dir(families_dir())
+        .map(|rd| rd.into_iter().filter_map(|e| e.is_dir.then_some(e)).map(|e| family_display_name(&e.path_buf())).collect())
         .unwrap_or_default();
     v.sort_by_key(|s| s.to_lowercase());
     v
@@ -328,15 +344,15 @@ pub fn list_families() -> Vec<String> {
 /// already checked the name is non-empty and not already taken.
 pub fn create_family(name: &str) {
     let dir = family_dir(name);
-    let _ = std::fs::create_dir_all(dir.join("saves"));
-    let _ = std::fs::write(dir.join("name.txt"), name.trim());
+    let _ = osiris_vfs::create_dir_all(dir.join("saves"));
+    let _ = osiris_vfs::write(dir.join("name.txt"), name.trim());
     choose_family(name);
 }
 
 /// Removes a family and all of its saved games. If it was the current family,
 /// [`load_current_family`] naturally stops finding it, so no pointer needs clearing.
 pub fn delete_family(name: &str) {
-    let _ = std::fs::remove_dir_all(family_dir(name));
+    let _ = osiris_vfs::remove_dir_all(family_dir(name));
 }
 
 fn current_family_path() -> PathBuf {
@@ -345,14 +361,14 @@ fn current_family_path() -> PathBuf {
 
 /// Remembers the last chosen family, for next launch.
 pub fn choose_family(name: &str) {
-    let _ = std::fs::create_dir_all(user_dir());
-    let _ = std::fs::write(current_family_path(), name.trim());
+    let _ = osiris_vfs::create_dir_all(user_dir());
+    let _ = osiris_vfs::write(current_family_path(), name.trim());
 }
 
 /// The last chosen family, if it still exists.
 fn load_current_family() -> String {
-    let name = std::fs::read_to_string(current_family_path()).unwrap_or_default().trim().to_owned();
-    if !name.is_empty() && family_dir(&name).is_dir() { name } else { String::new() }
+    let name = osiris_vfs::read_to_string(current_family_path()).unwrap_or_default().trim().to_owned();
+    if !name.is_empty() && osiris_vfs::is_dir(family_dir(&name)) { name } else { String::new() }
 }
 
 /// Moves the pre-family `name.txt`/`progress.txt`/`saves/` into a family folder, the
@@ -363,28 +379,27 @@ fn migrate_legacy_family() {
     }
     let legacy_progress = legacy_progress_path();
     let legacy_saves = legacy_saves_dir();
-    let has_saves = std::fs::read_dir(&legacy_saves).is_ok_and(|rd| rd.filter_map(|e| e.ok()).any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("osiris"))));
-    if !legacy_progress.exists() && !has_saves {
+    let has_saves = osiris_vfs::read_dir(&legacy_saves).is_ok_and(|rd| rd.into_iter().any(|e| e.path_buf().to_string_lossy().ends_with("osiris") && !e.is_dir));
+    if !osiris_vfs::exists(&legacy_progress) && !has_saves {
         return;
     }
-    let name = std::fs::read_to_string(legacy_name_path())
+    let name = osiris_vfs::read_to_string(legacy_name_path())
         .ok()
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(default_family_name);
     let dir = family_dir(&name);
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("name.txt"), &name);
-    if legacy_progress.exists() {
-        let _ = std::fs::rename(&legacy_progress, dir.join("progress.txt"));
+    let _ = osiris_vfs::create_dir_all(&dir);
+    let _ = osiris_vfs::write(dir.join("name.txt"), &name);
+    if osiris_vfs::exists(&legacy_progress) {
+        let _ = osiris_vfs::rename(&legacy_progress, dir.join("progress.txt"));
     }
     let saves_dir = dir.join("saves");
-    let _ = std::fs::create_dir_all(&saves_dir);
-    if let Ok(rd) = std::fs::read_dir(&legacy_saves) {
-        for e in rd.filter_map(|e| e.ok()) {
-            let p = e.path();
-            if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("osiris")) {
-                let _ = std::fs::rename(&p, saves_dir.join(p.file_name().unwrap()));
+    let _ = osiris_vfs::create_dir_all(&saves_dir);
+    if let Ok(rd) = osiris_vfs::read_dir(&legacy_saves) {
+        for e in rd {
+            if !e.is_dir && e.path_buf().to_string_lossy().ends_with("osiris") {
+                let _ = osiris_vfs::rename(&e.path_buf(), saves_dir.join(e.file_name()));
             }
         }
     }
@@ -409,15 +424,15 @@ pub fn player_name() -> String {
 
 /// Where the player is in `family`'s campaign.
 fn load_progress(c: &Campaign, family: &str) -> progress::Progress {
-    match std::fs::read_to_string(family_progress_path(family)) {
+    match osiris_vfs::read_to_string(family_progress_path(family)) {
         Ok(text) => progress::Progress::parse(c, &text),
         Err(_) => progress::Progress::new(c),
     }
 }
 
 fn save_progress(p: &progress::Progress, family: &str) {
-    let _ = std::fs::create_dir_all(family_dir(family));
-    let _ = std::fs::write(family_progress_path(family), p.to_text());
+    let _ = osiris_vfs::create_dir_all(family_dir(family));
+    let _ = osiris_vfs::write(family_progress_path(family), p.to_text());
 }
 
 /// The "Unlock All Missions" cheat (not in the original): plays the whole campaign
@@ -485,7 +500,7 @@ fn campaign_view(assets: &Assets, p: &progress::Progress, at: &progress::Progres
         choice,
         results: p.results.clone(),
         period: p.period(&assets.campaign),
-        resume: p.save.as_ref().is_some_and(|s| s.exists()),
+        resume: p.save.as_ref().is_some_and(|s| osiris_vfs::exists(s)),
     }
 }
 
@@ -525,7 +540,7 @@ fn review_view(assets: &Assets, world: &World, mission: Option<usize>, map: Opti
 /// maps' own description is the editor's placeholder), but Osiris shows them when a
 /// custom map's mission is reviewed.
 fn map_notes(map: &Path) -> Option<String> {
-    let raw = std::fs::read(map.with_extension("txt")).ok()?;
+    let raw = osiris_vfs::read(map.with_extension("txt")).ok()?;
     let text = osiris_formats::text::decode_cp1252(&raw).replace("\r\n", "\n");
     let mut body = text.trim();
     if body.starts_with('"')
@@ -1885,6 +1900,7 @@ fn log_path() -> PathBuf {
 fn init_logging(headless: bool) {
     let to_file = cfg!(windows) && !headless;
     let mut logger = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(if to_file { "warn,osiris=info" } else { "warn" }));
+    #[cfg(windows)]
     if to_file && let Ok(f) = std::fs::File::create(log_path()) {
         logger.target(env_logger::Target::Pipe(Box::new(f)));
     }

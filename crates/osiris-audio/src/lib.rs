@@ -91,7 +91,7 @@ impl Audio {
         let speech_player = rodio::Player::connect_new(&mixer);
         let ambient_player = rodio::Player::connect_new(&mixer);
 
-        let music_rows = std::fs::read_to_string(game_dir.join("music.txt"))
+        let music_rows = osiris_vfs::read_to_string(game_dir.join("music.txt"))
             .map(|text| music::parse_music_txt(&text))
             .unwrap_or_else(|_| {
                 eprintln!(
@@ -303,7 +303,7 @@ impl Inner {
 
     fn play_effect(&self, name_or_path: &Path) {
         let mut path = self.resolve_effect_path(name_or_path);
-        if !path.exists()
+        if !osiris_vfs::exists(&path)
             && let Ok(sub) = path.strip_prefix(self.game_dir.join("AUDIO"))
             && let Some(found) = self.find(&sub.to_path_buf())
         {
@@ -394,13 +394,13 @@ fn find_ignoring_case(root: &Path, sub: &Path) -> Option<PathBuf> {
     let mut path = root.to_path_buf();
     for part in sub.components() {
         let exact = path.join(part);
-        if exact.exists() {
+        if osiris_vfs::exists(&exact) {
             path = exact;
             continue;
         }
         let want = part.as_os_str();
-        let dir = std::fs::read_dir(&path).ok()?;
-        path = dir.filter_map(|e| e.ok()).find(|e| e.file_name().eq_ignore_ascii_case(want))?.path();
+        let dir = osiris_vfs::read_dir(&path).ok()?;
+        path = dir.into_iter().find(|e| e.file_name().eq_ignore_ascii_case(want))?.path_buf();
     }
     Some(path)
 }

@@ -4,9 +4,11 @@
 //! A movie missing from the install (or one that won't open) is skipped without a
 //! word, and the player can turn movies off (Options > Sound).
 
+#[cfg(not(target_arch = "wasm32"))]
 use osiris_audio::{Audio, StreamSound};
 use osiris_render::{DynamicHandle, Renderer, Space};
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
 use std::time::Duration;
 use web_time::Instant;
@@ -65,6 +67,11 @@ impl Movie {
     /// Opens movie `name` from the game data and starts it (its sound on `audio` at
     /// `volume`), or `None` if it isn't there.
     pub fn start(data: &Path, name: &str, audio: Option<&Audio>, volume: f32) -> Option<Movie> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            log::info!("movies are not played in the browser yet: {name}");
+            return None;
+        }
         let path = path(data, name)?;
         let movie = match osiris_bink::Movie::open(&path) {
             Ok(m) => m,
@@ -82,10 +89,16 @@ impl Movie {
 
     /// Opens movie `name` without sound, for screenshots.
     pub fn silent(data: &Path, name: &str) -> Option<Movie> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            log::info!("movies are not played in the browser yet: {name}");
+            return None;
+        }
         let movie = osiris_bink::Movie::open(path(data, name)?).ok()?;
         Some(Movie::run(name, movie, None))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn run(name: &str, mut movie: osiris_bink::Movie<std::io::BufReader<std::fs::File>>, sound: Option<StreamSound>) -> Movie {
         let (width, height, fps, frames) = (movie.width(), movie.height(), movie.fps(), movie.frames() as usize);
         let (tx, rx) = sync_channel(AHEAD);

@@ -6,7 +6,7 @@
 
 ## 2. Threads
 - [x] 2.1 Autosave: add `write_autosave` and the two cfg branches in `main.rs`. Check: `cargo test -p osiris-app autosaves_rotate` passes; wasm check exits 0.
-- [ ] 2.2 Movies: return `None` in the browser and gate `Movie::run`. Check: `cargo test -p osiris-app` passes; wasm check exits 0; `grep -n 'thread::' crates/osiris-app/src/*.rs` shows only lines under `#[cfg(not(target_arch = "wasm32"))]`.
+- [x] 2.2 Movies: return `None` in the browser and gate `Movie::run`. Check: `cargo test -p osiris-app` passes; wasm check exits 0; `grep -n 'thread::' crates/osiris-app/src/*.rs` shows only lines under `#[cfg(not(target_arch = "wasm32"))]`.
 
 ## 3. Close
 - [ ] 3.1 `scripts/check.sh` ends with `CHECK OK`.

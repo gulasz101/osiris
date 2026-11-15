@@ -21,3 +21,11 @@ The in-memory store SHALL find a file whatever the case of its path, and SHALL l
 - WHEN the code reads `/g/data/PHARAOH_TEXT.ENG`
 - THEN it gets the mounted bytes
 - AND `read_dir("/g/data")` lists `Pharaoh_Text.eng`
+
+### Requirement: App files use the file layer
+Non-test code in `crates/osiris-app/src`, except `main.rs`, SHALL reach files only through `osiris-vfs`.
+
+#### Scenario: only main.rs left
+- GIVEN the repo after this change
+- WHEN `scripts/no-direct-fs.sh crates/osiris-app/src` runs
+- THEN every line it prints is in `crates/osiris-app/src/main.rs`

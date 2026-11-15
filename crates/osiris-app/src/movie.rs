@@ -8,7 +8,8 @@ use osiris_audio::{Audio, StreamSound};
 use osiris_render::{DynamicHandle, Renderer, Space};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The movies, by the names the original gives their files.
 pub const INTRO: &str = "Intro_big";

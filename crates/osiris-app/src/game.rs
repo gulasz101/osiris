@@ -615,7 +615,7 @@ impl Game {
         let ms = ms_per_tick(self.speed);
         // Don't try to catch up after a long stall (window hidden, debugger).
         self.accumulator = (self.accumulator + dt * 1000.0).min(ms.max(TICK_BUDGET_MS) * 50.0);
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         while self.accumulator >= ms {
             self.accumulator -= ms;
             match &mut self.replay {

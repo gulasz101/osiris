@@ -38,7 +38,7 @@ pub type View = [f32; 4];
 impl CitySounds {
     fn rand(&mut self) -> u32 {
         if self.seed == 0 {
-            self.seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+            self.seed = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
         }
         self.seed ^= self.seed << 13;
         self.seed ^= self.seed >> 7;

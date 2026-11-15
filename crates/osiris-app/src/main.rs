@@ -580,13 +580,13 @@ struct App {
     sound_window: Option<sound_options::SoundWindow>,
     sound_click: Option<[f32; 2]>,
     keys: std::collections::HashSet<KeyCode>,
-    last_frame: std::time::Instant,
+    last_frame: web_time::Instant,
     status: Option<(String, f32)>,
     /// A File-menu request the city made while drawing (a popup answered), carried
     /// out once the frame is done.
     drawn_request: Option<top_menu::MenuAction>,
     /// When the city was last saved automatically: its month, and the moment.
-    autosaved: Option<(i32, std::time::Instant)>,
+    autosaved: Option<(i32, web_time::Instant)>,
     /// The active family; empty until one is chosen (gating the menu on startup).
     family: String,
     run: Run,
@@ -1137,10 +1137,10 @@ impl App {
 /// on. Osiris keeps the last few autosaves of each city beside its saved game (see
 /// `AUTOSAVES`); at high speeds it saves at most every few seconds, and writes the
 /// file off the main thread.
-fn autosave(game: &game::Game, saves: &Path, last: &mut Option<(i32, std::time::Instant)>) -> Option<PathBuf> {
+fn autosave(game: &game::Game, saves: &Path, last: &mut Option<(i32, web_time::Instant)>) -> Option<PathBuf> {
     let w = &game.world;
     let month = w.time.year * 12 + w.time.month as i32;
-    let now = std::time::Instant::now();
+    let now = web_time::Instant::now();
     match *last {
         None => {
             *last = Some((month, now));
@@ -1584,7 +1584,7 @@ impl ApplicationHandler for App {
 
 impl App {
     fn redraw(&mut self) {
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         if let Some((_, t)) = &mut self.status {
@@ -2250,7 +2250,7 @@ fn run(mut args: Args) -> Result<()> {
         sound_window: None,
         sound_click: None,
         keys: Default::default(),
-        last_frame: std::time::Instant::now(),
+        last_frame: web_time::Instant::now(),
         status: None,
         drawn_request: None,
         autosaved: None,

@@ -1706,6 +1706,7 @@ dependencies = [
  "pollster 1.0.1",
  "rfd",
  "toml",
+ "web-time",
  "wgpu",
  "winit",
 ]

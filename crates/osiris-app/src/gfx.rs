@@ -254,11 +254,11 @@ pub fn screenshot(
     let scale = screenshot_scale(h);
     renderer.scale = scale;
     renderer.screen = [w as f32 / scale, h as f32 / scale];
-    let first = std::time::Instant::now();
+    let first = web_time::Instant::now();
     draw(&mut renderer);
     let first_build = first.elapsed();
     let sprites = renderer.instance_count();
-    let t0 = std::time::Instant::now();
+    let t0 = web_time::Instant::now();
     renderer.flush(&texture.create_view(&Default::default()), Some(CLEAR));
     // OSIRIS_BENCH_FRAMES=N draws N more frames and reports the time spent building
     // the sprite list and drawing it, for benchmarks.
@@ -266,10 +266,10 @@ pub fn screenshot(
         let view = texture.create_view(&Default::default());
         let (mut build, mut gpu) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
         for _ in 0..n {
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             draw(&mut renderer);
             build += t.elapsed();
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             renderer.flush(&view, Some(CLEAR));
             renderer.device().poll(wgpu::PollType::wait_indefinitely())?;
             gpu += t.elapsed();

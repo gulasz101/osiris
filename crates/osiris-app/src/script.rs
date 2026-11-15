@@ -160,10 +160,10 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
             // Runs N ticks, reporting the time taken, the slowest tick and figures that never moved.
             ["timed", n] => {
                 let before: std::collections::HashMap<_, _> = world.figures.iter().map(|f| (f.id, (f.x, f.y, f.kind, f.action))).collect();
-                let start = std::time::Instant::now();
+                let start = web_time::Instant::now();
                 let mut worst = std::time::Duration::ZERO;
                 for _ in 0..n.parse::<u32>()? {
-                    let t = std::time::Instant::now();
+                    let t = web_time::Instant::now();
                     world.tick();
                     worst = worst.max(t.elapsed());
                 }

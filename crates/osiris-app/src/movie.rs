@@ -32,12 +32,15 @@ const AHEAD: usize = 6;
 pub fn path(data: &Path, name: &str) -> Option<PathBuf> {
     let dir = data.join("BINKS").join("High");
     let exact = dir.join(format!("{name}.bik"));
-    if exact.is_file() {
+    if osiris_vfs::is_file(&exact) {
         return Some(exact);
     }
     // Installs differ in the case of their file names.
     let want = format!("{name}.bik").to_lowercase();
-    std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().to_lowercase() == want))
+    osiris_vfs::read_dir(&dir).ok()?.into_iter().find_map(|e| {
+        let path = PathBuf::from(&e.path);
+        path.file_name().is_some_and(|f| f.to_string_lossy().to_lowercase() == want).then_some(path)
+    })
 }
 
 /// Opens movie `name` from the game data and starts it (its sound on `audio` at

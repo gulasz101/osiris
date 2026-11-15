@@ -2130,7 +2130,7 @@ impl Game {
         let click = self.lost_click.take();
         // A custom map can be replayed while its file is still there, as the original
         // offers it.
-        let replay = self.world.mission.is_some() || self.replay_map.as_ref().is_some_and(|p| p.exists());
+        let replay = self.world.mission.is_some() || self.replay_map.as_ref().is_some_and(|p| osiris_vfs::exists(p));
         let time = self.world.mission.is_some() && self.world.lost_to_time();
         let mut ui = crate::widgets::Ui { r, panels: &self.images.panels, img, text: &self.text, cursor: self.cursor, click };
         let (title, body) = if time { (38, 39) } else { (1, 16) };

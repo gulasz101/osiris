@@ -592,7 +592,7 @@ impl Briefing {
 impl Menu {
     #[allow(clippy::too_many_arguments)]
     pub fn new(mission_names: Vec<String>, campaign: CampaignView, maps: Vec<PathBuf>, mut saves: Vec<PathBuf>, rules: Rules, family: String, family_text: FamilyText, text: Arc<TextTable>, data: PathBuf) -> Self {
-        saves.sort_by_key(|p| std::cmp::Reverse(std::fs::metadata(p).and_then(|m| m.modified()).ok()));
+        saves.sort_by_key(|p| std::cmp::Reverse(osiris_vfs::modified(p).ok()));
         let mut m = Self {
             page: Page::Main,
             items: Vec::new(),

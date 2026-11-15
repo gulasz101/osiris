@@ -27,12 +27,12 @@ pub fn ui_size_label() -> String {
 }
 
 pub fn load_ui_size() {
-    let s = std::fs::read_to_string(crate::user_dir().join("ui_size.txt")).unwrap_or_default();
+    let s = osiris_vfs::read_to_string(crate::user_dir().join("ui_size.txt")).unwrap_or_default();
     set_ui_size(UI_SIZES.iter().position(|(name, _)| *name == s.trim()).unwrap_or(0) as u8);
 }
 
 pub fn save_ui_size() {
-    let _ = std::fs::write(crate::user_dir().join("ui_size.txt"), format!("{}\n", UI_SIZES[ui_size() as usize].0));
+    let _ = osiris_vfs::write(crate::user_dir().join("ui_size.txt"), format!("{}\n", UI_SIZES[ui_size() as usize].0));
 }
 
 /// Whether the window is (or is about to be) shown full screen. The window itself
@@ -315,10 +315,15 @@ pub fn screenshot(
     }
     drop(data);
     eprintln!("rendered {sprites} sprites in {:?}", t0.elapsed());
-    let file = std::io::BufWriter::new(std::fs::File::create(out)?);
-    let mut enc = png::Encoder::new(file, w, h);
-    enc.set_color(png::ColorType::Rgba);
-    enc.set_depth(png::BitDepth::Eight);
-    enc.write_header()?.write_image_data(&pixels)?;
+    // Encode the PNG into a Vec<u8>, then write it through osiris_vfs.
+    let mut data = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut data, w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header()?;
+        writer.write_image_data(&pixels)?;
+    }
+    osiris_vfs::write(out, data)?;
     Ok(())
 }

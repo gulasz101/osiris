@@ -1,4 +1,10 @@
 # Link the C runtime into osiris.exe so it starts on a PC without the Visual C++
 # redistributable installed.
+# Link the C runtime into osiris.exe so it starts on a PC without the Visual C++
+# redistributable installed.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# getrandom needs this flag to use the wasm_js backend for both 0.3 and 0.4.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", 'getrandom_backend="wasm_js"']

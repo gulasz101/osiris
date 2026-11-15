@@ -82,6 +82,7 @@ pub fn find(user_dir: &Path) -> Option<PathBuf> {
 
 /// Asks for the game folder until the player picks one holding the game or gives up,
 /// and remembers it.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn pick(user_dir: &Path) -> Option<PathBuf> {
     use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
     let mut text = format!("{}\n\n{}", tr("Osiris plays from your own copy of Pharaoh (the GOG or Steam \"Pharaoh + Cleopatra\", or the original CD install)."), tr("Choose the folder Pharaoh is installed in: the one holding its Data folder and mission1.pak."));
@@ -110,8 +111,21 @@ pub fn pick(user_dir: &Path) -> Option<PathBuf> {
     }
 }
 
+/// In the browser the page hands the game folder over itself (see the `web-page` change).
+#[cfg(target_arch = "wasm32")]
+pub fn pick(_user_dir: &Path) -> Option<PathBuf> {
+    None
+}
+
 /// Shows a fatal error where the player can see it: a window without a console
 /// (Windows, or an app launched from Finder) would otherwise just vanish.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn show_error(message: &str) {
     rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("Osiris").set_description(message).set_buttons(rfd::MessageButtons::Ok).show();
+}
+
+/// In the browser errors are logged to the console instead.
+#[cfg(target_arch = "wasm32")]
+pub fn show_error(_message: &str) {
+    // Errors go to the JS console via wasm-bindgen in main.rs.
 }

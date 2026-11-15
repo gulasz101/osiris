@@ -108,7 +108,7 @@ pub struct Movie {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub struct Movie {}
+pub struct Movie { pub done: bool }
 
 #[cfg(target_arch = "wasm32")]
 impl Movie {

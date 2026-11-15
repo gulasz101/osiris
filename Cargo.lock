@@ -1749,6 +1749,7 @@ name = "osiris-sim"
 version = "0.1.15"
 dependencies = [
  "osiris-formats",
+ "osiris-vfs",
  "rmp-serde",
  "serde",
  "toml",

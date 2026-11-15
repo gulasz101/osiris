@@ -128,11 +128,11 @@ impl Replay {
     }
 
     pub fn read(path: &std::path::Path) -> Result<Self, String> {
-        Self::from_bytes(&std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?)
+        Self::from_bytes(&osiris_vfs::read(path).map_err(|e| format!("{}: {e}", path.display()))?)
     }
 
     pub fn write(&self, path: &std::path::Path) -> Result<(), String> {
-        std::fs::write(path, self.to_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+        osiris_vfs::write(path, self.to_bytes()).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
 

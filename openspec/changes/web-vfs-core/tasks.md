@@ -6,7 +6,7 @@
 
 ## 2. Game-data crates
 - [x] 2.1 `osiris-formats` uses `osiris_vfs`. Check: `scripts/no-direct-fs.sh crates/osiris-formats/src` prints `no-direct-fs: OK` and `cargo test -p osiris-formats` passes.
-- [ ] 2.2 `osiris-sim` uses `osiris_vfs`. Check: `scripts/no-direct-fs.sh crates/osiris-sim/src` prints OK and `cargo test -p osiris-sim` passes (give the call `timeout: 1500`).
+- [x] 2.2 `osiris-sim` uses `osiris_vfs`. Check: `scripts/no-direct-fs.sh crates/osiris-sim/src` prints OK and `cargo test -p osiris-sim` passes (give the call `timeout: 1500`).
 - [ ] 2.3 `osiris-audio` uses `osiris_vfs`. Check: `scripts/no-direct-fs.sh crates/osiris-audio/src` prints OK and `cargo test -p osiris-audio` passes.
 - [ ] 2.4 `osiris-bink` uses `osiris_vfs::open` / `osiris_vfs::Reader`. Check: `scripts/no-direct-fs.sh crates/osiris-bink/src` prints OK, `cargo test -p osiris-bink` passes and `cargo check -p osiris-app` exits 0 (`movie.rs` names the reader type; change `std::io::BufReader<std::fs::File>` there to `osiris_vfs::Reader` in the same commit).
 

@@ -122,14 +122,14 @@ impl Balance {
     /// folder `data`: buildings and houses, tax sentiment and fighting units.
     pub fn load(data: &std::path::Path, d: &str) -> Result<Self, String> {
         let model_path = data.join(format!("Pharaoh_Model_{d}.txt"));
-        let model_text = std::fs::read(&model_path).map_err(|e| format!("{}: {e}", model_path.display()))?;
+        let model_text = osiris_vfs::read(&model_path).map_err(|e| format!("{}: {e}", model_path.display()))?;
         let model = Model::parse(&String::from_utf8_lossy(&model_text)).map_err(|e| format!("{}: {e}", model_path.display()))?;
         let mut balance = Self::from_model(&model);
-        if let Ok(t) = std::fs::read(data.join(format!("Tax_Sentiment_Model_{d}.txt"))) {
+        if let Ok(t) = osiris_vfs::read(data.join(format!("Tax_Sentiment_Model_{d}.txt"))) {
             balance.tax_sentiment = osiris_formats::model::parse_tax_sentiment(&String::from_utf8_lossy(&t));
         }
         let figures = data.join(format!("Figure_model_{}.txt", d.to_lowercase()));
-        if let Ok(t) = std::fs::read(figures).or_else(|_| std::fs::read(data.join("Figure_model.txt"))) {
+        if let Ok(t) = osiris_vfs::read(figures).or_else(|_| osiris_vfs::read(data.join("Figure_model.txt"))) {
             balance.set_units(&osiris_formats::model::parse_figures(&String::from_utf8_lossy(&t)).map_err(|e| e.to_string())?);
         }
         Ok(balance)

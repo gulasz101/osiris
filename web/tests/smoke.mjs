@@ -33,6 +33,44 @@ const server = http.createServer(createHandler());
 const consoleMessages = [];
 let browser, page;
 
+/** Recursively collect all file paths under `root`. */
+function walk(root, dir) {
+    /** @type {string[]} */
+    const result = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            result.push(...walk(root, full));
+        } else {
+            result.push(path.relative(root, full));
+        }
+    }
+    return result;
+}
+
+/** Filter to only essential game files needed to reach the main menu. */
+function filterEssential(paths) {
+    // Return all paths - we need everything for a proper test
+    return paths;
+}
+
+/** Copy essential files into a temp directory under WEB_DIR for HTTP serving. */
+function stageFiles(osirisData, relPaths) {
+    const stagingDir = path.join(WEB_DIR, "game-data-staging");
+    if (fs.existsSync(stagingDir)) {
+        fs.rmSync(stagingDir, { recursive: true });
+    }
+
+    for (const rel of relPaths) {
+        const src = path.join(osirisData, rel);
+        const dst = path.join(stagingDir, "PharaohData", rel);
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.copyFileSync(src, dst);
+    }
+
+    return stagingDir;
+}
+
 async function run() {
     await new Promise((resolve) => server.listen(PORT, resolve));
 
@@ -75,6 +113,77 @@ async function run() {
         if (!foundReady) {
             console.error("FAIL: never saw 'osiris web: ready'");
             process.exitCode = 1;
+            return;
+        }
+
+        // ── Game data smoke test (when OSIRIS_DATA is set) ────────────
+        const osirisData = process.env.OSIRIS_DATA;
+        if (osirisData && fs.existsSync(osirisData)) {
+            console.log("osiris web: loading game data from " + osirisData);
+
+            /** @type {string[]} */
+            const allPaths = walk(osirisData, osirisData);
+            const relPaths = filterEssential(allPaths);
+            console.log("osiris web: " + allPaths.length + " total files, mounting " + relPaths.length + " essential");
+
+            // Stage files on disk so the HTTP server can serve them.
+            const stagingDir = stageFiles(osirisData, relPaths);
+            console.log("osiris web: staged to " + stagingDir);
+
+            // Mount all game files by fetching from the test server and using mount_file.
+            // Use paths like "PharaohData/..." so mount_file creates /PharaohData/...
+            await page.evaluate(async (paths) => {
+                let count = 0;
+                for (const rel of paths) {
+                    const vfsPath = "PharaohData/" + rel;
+                    const resp = await fetch("/game-data-staging/PharaohData/" + rel);
+                    if (!resp.ok) {
+                        console.error("Failed to fetch " + rel + ": " + resp.status);
+                        continue;
+                    }
+                    const buf = new Uint8Array(await resp.arrayBuffer());
+                    mount_file(vfsPath, buf);
+                    count++;
+                    if (count % 50 === 0) {
+                        console.log("osiris web: mounted " + count + "/" + paths.length + " files");
+                    }
+                }
+            }, relPaths);
+
+            // Clean up staging directory.
+            fs.rmSync(stagingDir, { recursive: true });
+
+            console.log("osiris web: all essential game files mounted, starting game...");
+
+            // Start the game — returns a Promise on wasm.
+            await page.evaluate(() => start_game());
+
+            // Wait for main menu (up to 300 s for large folders).
+            const menuDeadline = Date.now() + 300_000;
+            let foundMenu = false;
+            while (Date.now() < menuDeadline) {
+                await new Promise((r) => setTimeout(r, 500));
+                for (const m of consoleMessages) {
+                    if (m.includes("osiris web: main menu")) {
+                        foundMenu = true;
+                    }
+                }
+                if (foundMenu) break;
+            }
+
+            // Print any new messages.
+            for (const m of consoleMessages) {
+                console.log(m);
+            }
+
+            if (!foundMenu) {
+                console.error("FAIL: never saw 'osiris web: main menu'");
+                process.exitCode = 1;
+            } else {
+                // Take a screenshot.
+                await page.screenshot({ path: "/tmp/osiris-web-menu.png", fullPage: false });
+                console.log("osiris web: screenshot written to /tmp/osiris-web-menu.png");
+            }
         }
     } finally {
         try {

@@ -1,0 +1,10 @@
+#!/bin/sh
+# OpenSpec CLI pinned to one version, so every agent run sees the same behaviour.
+# Usage: scripts/openspec <command> [args]. Never call it without arguments (it waits for input).
+if [ "$#" -eq 0 ]; then
+  echo "scripts/openspec: give a command, for example: list, status --change NAME, validate --all --strict" >&2
+  exit 2
+fi
+export OPENSPEC_NO_ANIMATION=1 NO_COLOR=1 OPENSPEC_TELEMETRY=0
+cd "$(dirname "$0")/.." || exit 1
+exec npx -y @fission-ai/openspec@2.0.0 "$@" </dev/null

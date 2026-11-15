@@ -1,0 +1,29 @@
+schema: spec-driven
+
+# Read by `openspec instructions` on every call.
+context: |
+  Goal: run Osiris (Rust Pharaoh + Cleopatra engine) in a web browser as wasm32-unknown-unknown.
+  The player drops their own game folder into the page; files are read into memory, never uploaded.
+  We port, we do not redesign: no changes to game rules or to how the game looks.
+  The desktop build must keep working: `cargo test --workspace` stays green after every task.
+  Browser-only code sits behind #[cfg(target_arch = "wasm32")].
+  No game file ever goes into git, fixtures, comments or logs.
+  Library versions are pinned by Cargo.lock; look APIs up in docs-mcp for exactly those versions.
+  The implementer is a small local model: one task = one small commit, the check named in the task
+  must pass before the box is ticked.
+
+rules:
+  tasks:
+    - Each task names the files to touch and the command that proves it is done.
+    - A task is small enough for one commit (under about 150 changed lines).
+  design:
+    - Name the exact functions, types and cfg gates. Quote the docs-mcp source for each API.
+
+operations:
+  apply:
+    guidance:
+      - Do the first unchecked task only, run its check, tick it, commit and push, then continue.
+      - Never tick a task whose check failed. Never change tasks.md wording; only tick boxes.
+  archive:
+    guidance:
+      - Run scripts/check.sh first; archive only when it ends with CHECK OK.

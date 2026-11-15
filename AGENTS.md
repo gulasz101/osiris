@@ -82,6 +82,11 @@ which docs you used.
   fails if one is tracked. Tests use bytes made up in the test.
 - Real game data may exist on this machine outside the repo (`$OSIRIS_DATA`, see your issue).
   Read it, never copy it into the repo.
+- The only exception is the smoke test's temp folder `web/game-data-staging/`. It is in
+  `.gitignore`. Never `git add -f` it.
+- Local git hooks block any commit or push with a game file, a file over 5 MB, or a path under
+  `game-data-staging/` or `PharaohData/`. If a hook blocks you, remove the file from the commit
+  (`git rm --cached <file>`, then `git commit --amend`). Never use `--no-verify`.
 
 ## Commands
 - Native tests: `cargo test --workspace` (takes a few minutes; give the bash call `timeout: 1500`).

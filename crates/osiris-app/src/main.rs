@@ -45,6 +45,10 @@ use anyhow::{Context, Result, bail};
 use osiris_formats::{Campaign, ImageLibrary, MessageTable, MissionPak, Scenario, TextTable};
 use osiris_vfs;
 use osiris_sim::{Balance, Defs, World};
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
@@ -620,6 +624,11 @@ struct App {
     /// The royal tombs the mission just won leaves for the Valley missions after it:
     /// as a family history notes them, and as a mission played on its own does.
     won_tombs: [Vec<osiris_sim::royal_tombs::CarriedTomb>; 2],
+    /// Browser-only: holds the pending graphics result while `Gfx::new` runs
+    /// asynchronously via `spawn_local`. Once ready, [`window_event`] takes it
+    /// and calls [`finish_start`].
+    #[cfg(target_arch = "wasm32")]
+    pending: Rc<RefCell<Option<Result<(sidebar::SidebarImages, gfx::Gfx), anyhow::Error>>>>,
 }
 
 impl App {
@@ -1239,56 +1248,158 @@ fn load_game(assets: &Assets, path: &Path) -> Result<World> {
 }
 
 impl ApplicationHandler for App {
-    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.gfx.is_some() {
             return;
         }
-        // An explicit --size (as every screenshot passes) wins outright; otherwise
-        // the player's saved window comes back, clamped to the monitor it's on now,
-        // or else a size that fits this monitor comfortably.
-        let (size, maximized, fullscreen) = if self.args.size_given {
-            (self.args.size, false, false)
-        } else if let Some((size, maximized, fullscreen)) = load_window_state() {
-            (clamp_to_monitor(size, _event_loop), maximized, fullscreen)
-        } else {
-            // A fresh install opens full screen; the size that fits the monitor
-            // becomes the windowed size to come back to once the player turns full
-            // screen off (there's no windowed session of its own to remember one).
-            (default_window_size(_event_loop), false, true)
-        };
-        self.windowed_size = size;
-        gfx::set_fullscreen(fullscreen);
-        let mut attrs = Window::default_attributes()
-            .with_title("Osiris")
-            .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
-            .with_min_inner_size(winit::dpi::LogicalSize::new(MIN_WINDOW.0, MIN_WINDOW.1))
-            .with_maximized(maximized && !fullscreen);
-        if fullscreen {
-            attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-        }
-        let started = (|| -> Result<_> {
-            let window = _event_loop.create_window(attrs).context("could not open a window")?;
-            let library = self.library.take().context("the game art was already taken")?;
-            let images = sidebar::SidebarImages::load(&library)?;
-            let gfx = pollster::block_on(gfx::Gfx::new(window, library))?;
-            Ok((images, gfx))
-        })();
-        let (images, gfx) = match started {
-            Ok(v) => v,
-            Err(e) => {
-                log::error!("{e:#}");
-                data_dir::show_error(&format!("{}\n\n{e:#}", tr("Osiris could not start its graphics.")));
-                _event_loop.exit();
-                return;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Desktop path: create a normal window and block on graphics init.
+            let (size, maximized, fullscreen) = if self.args.size_given {
+                (self.args.size, false, false)
+            } else if let Some((size, maximized, fullscreen)) = load_window_state() {
+                (clamp_to_monitor(size, event_loop), maximized, fullscreen)
+            } else {
+                // A fresh install opens full screen; the size that fits the monitor
+                // becomes the windowed size to come back to once the player turns full
+                // screen off (there's no windowed session of its own to remember one).
+                (default_window_size(event_loop), false, true)
+            };
+            self.windowed_size = size;
+            gfx::set_fullscreen(fullscreen);
+            let mut attrs = Window::default_attributes()
+                .with_title("Osiris")
+                .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
+                .with_min_inner_size(winit::dpi::LogicalSize::new(MIN_WINDOW.0, MIN_WINDOW.1))
+                .with_maximized(maximized && !fullscreen);
+            if fullscreen {
+                attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
             }
-        };
-        self.images = Some(images);
-        self.gfx = Some(gfx);
-        self.finish_start(_event_loop);
+            let started = (|| -> Result<_> {
+                let window = event_loop.create_window(attrs).context("could not open a window")?;
+                let library = self.library.take().context("the game art was already taken")?;
+                let images = sidebar::SidebarImages::load(&library)?;
+                let gfx = pollster::block_on(gfx::Gfx::new(window, library))?;
+                Ok((images, gfx))
+            })();
+            let (images, gfx) = match started {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("{e:#}");
+                    data_dir::show_error(&format!("{}\n\n{e:#}", tr("Osiris could not start its graphics.")));
+                    event_loop.exit();
+                    return;
+                }
+            };
+            self.images = Some(images);
+            self.gfx = Some(gfx);
+            self.finish_start(event_loop);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Browser path: get the page's canvas, create a window around it,
+            // and start graphics asynchronously.
+            use winit::platform::web::WindowAttributesExtWebSys;
+            use wasm_bindgen::JsCast;
+            let canvas = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("osiris"))
+                .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                .unwrap_or_else(|| {
+                    web_sys::window()
+                        .and_then(|w| w.document())
+                        .map(|d| d.create_element("canvas").ok())
+                        .flatten()
+                        .unwrap()
+                        .dyn_into::<web_sys::HtmlCanvasElement>()
+                        .unwrap()
+                });
+            // Un-hide the canvas.
+            let _ = canvas.style().set_property("display", "block");
+
+            let (width, height) = (
+                canvas.client_width() as u32,
+                canvas.client_height() as u32,
+            );
+            let attrs = Window::default_attributes()
+                .with_title("Osiris")
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    width.max(MIN_WINDOW.0),
+                    height.max(MIN_WINDOW.1),
+                ))
+                .with_min_inner_size(winit::dpi::LogicalSize::new(MIN_WINDOW.0, MIN_WINDOW.1))
+                .with_canvas(Some(canvas));
+
+            let window = match event_loop.create_window(attrs) {
+                Ok(w) => w,
+                Err(e) => {
+                    log::error!("could not open a window: {e:#}");
+                    return;
+                }
+            };
+
+            // Store the pending handle so window_event can pick it up.
+            let pending = self.pending.clone();
+            let library = match self.library.take() {
+                Some(lib) => lib,
+                None => {
+                    log::error!("the game art was already taken");
+                    return;
+                }
+            };
+
+            wasm_bindgen_futures::spawn_local(async move {
+                let images = match sidebar::SidebarImages::load(&library).map_err(anyhow::Error::msg) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        *pending.borrow_mut() = Some(Err(e));
+                        return;
+                    }
+                };
+                let gfx = match gfx::Gfx::new(window, library).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        *pending.borrow_mut() = Some(Err(e));
+                        return;
+                    }
+                };
+                *pending.borrow_mut() = Some(Ok((images, gfx)));
+                // The browser's rAF-driven event loop will call window_event next frame,
+                // which checks pending and calls finish_start.
+            });
+        }
     }
 
     /// What happens after graphics are ready: start the right screen.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // Browser: if graphics are still pending, try to take the result.
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Take the pending result out of the RefCell first so the borrow
+            // ends before we touch other fields of `self`.
+            let got = self.pending.borrow_mut().take();
+            if got.is_some() && self.gfx.is_none() {
+                let result = got.unwrap();
+                match result {
+                    Ok((images, gfx)) => {
+                        self.images = Some(images);
+                        self.gfx = Some(gfx);
+                        self.finish_start(event_loop);
+                    }
+                    Err(e) => {
+                        log::error!("{e:#}");
+                        self.status = Some((format!("Graphics failed: {e}"), 10.0));
+                    }
+                }
+                return;
+            } else {
+                // Still waiting for graphics; nothing to do this frame.
+                return;
+            }
+        }
+
         let Some(scale) = self.gfx.as_ref().map(|g| g.scale()) else { return };
         let at = [(self.cursor.0 / scale) as f32, (self.cursor.1 / scale) as f32];
         match event {
@@ -1565,7 +1676,7 @@ impl ApplicationHandler for App {
 
 impl App {
     /// What happens after graphics are ready: start the right screen.
-    fn finish_start(&mut self, event_loop: &ActiveEventLoop) {
+    fn finish_start(&mut self, _event_loop: &ActiveEventLoop) {
         let direct = if let Some(map) = &self.args.map {
             Some((Source::Map(map.clone()), None))
         } else {
@@ -1607,6 +1718,8 @@ impl App {
                 } else {
                     self.screen = Some(Screen::Menu(menu));
                 }
+                #[cfg(target_arch = "wasm32")]
+                log::info!("osiris web: main menu");
             }
         }
         if let Some(a) = &self.audio
@@ -2303,12 +2416,23 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         pending_path: None,
         won_tombs: Default::default(),
         editor_waiting: None,
+        #[cfg(target_arch = "wasm32")]
+        pending: Rc::new(RefCell::new(None)),
         // Replaced in `resumed`, once the window (and its monitor) exists.
         windowed_size: initial_size,
     };
-    event_loop.run_app(&mut app)?;
-    recording::flush();
-    Ok(())
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn_app(app);
+        return Ok(());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        event_loop.run_app(&mut app)?;
+        recording::flush();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

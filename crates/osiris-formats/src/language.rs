@@ -152,7 +152,7 @@ pub fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     }
     osiris_vfs::read_dir(dir).ok().and_then(|rd| {
         rd.into_iter()
-            .find(|e| e.is_file() && e.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+            .find(|e| !e.is_dir && e.file_name().to_string_lossy().eq_ignore_ascii_case(name))
             .map(|e| e.path_buf())
     })
 }
@@ -170,7 +170,7 @@ pub fn find_text_sets(data: &Path) -> Vec<TextSet> {
     let mut sets = Vec::new();
     for dir in dirs {
         let Ok(rd) = osiris_vfs::read_dir(&dir) else { continue };
-        let mut files: Vec<PathBuf> = rd.into_iter().map(|e| e.path_buf()).filter(|e| e.is_file()).collect();
+        let mut files: Vec<PathBuf> = rd.into_iter().map(|e| e.path_buf()).filter(|e| !osiris_vfs::is_dir(&e)).collect();
         files.sort();
         for text in &files {
             let Some(name) = text.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };

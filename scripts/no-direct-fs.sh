@@ -9,7 +9,22 @@ dirs="$*"
 # shellcheck disable=SC2086
 found=$(find $dirs -name '*.rs' ! -name 'test_support.rs' | sort | while read -r f; do
   awk -v f="$f" '
-    /^[[:space:]]*#\[cfg\(test\)\][[:space:]]*$/ { pending = 1; next }
+    /^[[:space:]]*#\[cfg\(/ {
+      tmp = $0; gsub(/\[/, "", tmp); gsub(/\]/, "", tmp)
+      depth = 0; n = split(tmp, chars, "")
+      for (i = 1; i <= n; i++) { if (chars[i] == "(") depth++; else if (chars[i] == ")") depth-- }
+      if ($0 ~ /#\[cfg\(test\)\]/) { pending = 1; next }
+      if (depth > 0) { in_cfg = 1; next }
+      skip_next = 1; next
+    }
+    in_cfg {
+      tmp = $0; n = split(tmp, chars, "")
+      for (i = 1; i <= n; i++) { if (chars[i] == ")") depth-- }
+      if (depth <= 0) in_cfg = 0
+      next
+    }
+    skip_next && !/^[[:space:]]*#/ { skip_next = 0; next }
+    skip_next { skip_next = 0 }
     pending && /^[[:space:]]*(pub(\([a-z]+\))? )?mod [A-Za-z_]+[[:space:]]*\{/ { exit }
     { pending = 0 }
     /^[[:space:]]*\/\// { next }

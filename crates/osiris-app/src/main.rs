@@ -1074,7 +1074,7 @@ impl App {
             }
             MenuAction::Replay => match (mission, map) {
                 (Some(n), _) => self.restart(n),
-                (None, Some(p)) if p.exists() => self.start_map(p),
+                (None, Some(ref p)) if osiris_vfs::exists(p) => self.start_map(p.clone()),
                 _ => self.status = Some((tr("Only campaign missions and maps can be replayed").into(), 3.0)),
             },
             _ => self.back_to_menu(),
@@ -1088,7 +1088,7 @@ impl App {
     fn quicksave(&mut self) {
         let Some(Screen::Playing(game, _)) = &self.screen else { return };
         let path = self.save_path(game);
-        let result = game.world.save().map_err(anyhow::Error::msg).and_then(|b| Ok(std::fs::write(&path, b)?));
+        let result = game.world.save().map_err(anyhow::Error::msg).and_then(|b| Ok(osiris_vfs::write(&path, b)?));
         let msg = match result {
             Ok(()) => trf("Saved {0}", &[&path.file_stem().unwrap_or_default().to_string_lossy()]),
             Err(e) => trf("Save failed: {0}", &[&e]),
@@ -1150,12 +1150,12 @@ impl App {
 
 /// Writes an autosave: to a temporary file first, then rotated into place.
 fn write_autosave(saves: &Path, name: &str, bytes: Vec<u8>) {
-    let _ = std::fs::create_dir_all(saves);
+    let _ = osiris_vfs::create_dir_all(saves);
     let path = autosave_path(saves, name, 1);
     let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, bytes).is_ok() {
+    if osiris_vfs::write(&tmp, bytes).is_ok() {
         rotate_autosaves(saves, name);
-        let _ = std::fs::rename(&tmp, &path);
+        let _ = osiris_vfs::rename(&tmp, &path);
     }
 }
 
@@ -1212,8 +1212,8 @@ fn autosave_path(saves: &Path, scenario: &str, n: usize) -> PathBuf {
 fn rotate_autosaves(saves: &Path, scenario: &str) {
     for n in (1..AUTOSAVES).rev() {
         let from = autosave_path(saves, scenario, n);
-        if from.exists() {
-            let _ = std::fs::rename(&from, autosave_path(saves, scenario, n + 1));
+        if osiris_vfs::exists(&from) {
+            let _ = osiris_vfs::rename(&from, autosave_path(saves, scenario, n + 1));
         }
     }
 }
@@ -1224,7 +1224,7 @@ pub fn sanitize(name: &str) -> String {
 }
 
 fn load_game(assets: &Assets, path: &Path) -> Result<World> {
-    let bytes = std::fs::read(path).with_context(|| path.display().to_string())?;
+    let bytes = osiris_vfs::read(path).with_context(|| path.display().to_string())?;
     let mut world = World::load(&bytes, assets.defs.clone(), assets.balance.clone()).map_err(anyhow::Error::msg)?;
     world.attach_balances(assets.balances.clone());
     // As in the original, a saved game brings back its difficulty, and the player

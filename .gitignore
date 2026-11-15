@@ -6,3 +6,5 @@
 /notes
 .claude/
 /crates/osiris-sim/tests/replays/*.osiris-replay
+web/pkg/
+web/tests/node_modules/

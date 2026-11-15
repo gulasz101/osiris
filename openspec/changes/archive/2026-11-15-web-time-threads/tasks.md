@@ -9,4 +9,4 @@
 - [x] 2.2 Movies: return `None` in the browser and gate `Movie::run`. Check: `cargo test -p osiris-app` passes; wasm check exits 0; `grep -n 'thread::' crates/osiris-app/src/*.rs` shows only lines under `#[cfg(not(target_arch = "wasm32"))]`.
 
 ## 3. Close
-- [ ] 3.1 `scripts/check.sh` ends with `CHECK OK`.
+- [x] 3.1 `scripts/check.sh` ends with `CHECK OK`.

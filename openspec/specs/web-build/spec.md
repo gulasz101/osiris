@@ -1,7 +1,7 @@
 # web-build Specification
 
 ## Purpose
-TBD - created by archiving change web-compiles. Update Purpose after archive.
+Ensures the Osiris game engine compiles for wasm32-unknown-unknown (browser) while keeping the desktop build and tests green.
 
 ## Requirements
 

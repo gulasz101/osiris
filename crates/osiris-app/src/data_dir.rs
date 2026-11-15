@@ -12,7 +12,7 @@ const REMEMBERED: &str = "data_dir.txt";
 
 /// Whether `dir` holds the game: its `Data/` folder with the art in it.
 fn is_game(dir: &Path) -> bool {
-    dir.join("Data").is_dir()
+    osiris_vfs::is_dir(dir.join("Data"))
 }
 
 /// The game folder for a folder the player picked: the install itself, the `Data/`
@@ -52,10 +52,10 @@ fn installs() -> Vec<PathBuf> {
     }
     let mut found = Vec::new();
     for base in bases {
-        let Ok(entries) = std::fs::read_dir(&base) else { continue };
-        for e in entries.flatten() {
-            if e.file_name().to_string_lossy().to_ascii_lowercase().starts_with("pharaoh") {
-                found.push(e.path());
+        let Ok(entries) = osiris_vfs::read_dir(&base) else { continue };
+        for entry in &entries {
+            if entry.file_name().to_string_lossy().to_ascii_lowercase().starts_with("pharaoh") {
+                found.push(entry.path_buf());
             }
         }
     }
@@ -65,7 +65,7 @@ fn installs() -> Vec<PathBuf> {
 /// The game data, if Osiris can find it without asking.
 pub fn find(user_dir: &Path) -> Option<PathBuf> {
     let mut candidates = Vec::new();
-    if let Ok(saved) = std::fs::read_to_string(user_dir.join(REMEMBERED)) {
+    if let Ok(saved) = osiris_vfs::read_to_string(user_dir.join(REMEMBERED)) {
         candidates.push(PathBuf::from(saved.trim()));
     }
     if let Ok(exe) = std::env::current_exe() {
@@ -104,7 +104,7 @@ pub fn pick(user_dir: &Path) -> Option<PathBuf> {
         }
         let dir = rfd::FileDialog::new().set_title(tr("Choose the Pharaoh folder")).pick_folder()?;
         if let Some(game) = game_in(&dir) {
-            let _ = std::fs::write(user_dir.join(REMEMBERED), game.to_string_lossy().as_bytes());
+            let _ = osiris_vfs::write(user_dir.join(REMEMBERED), game.to_string_lossy().as_bytes());
             return Some(game);
         }
         text = format!("{}\n\n{}", trf("{0} doesn't hold Pharaoh's Data folder.", &[&dir.display()]), tr("Choose the folder Pharaoh is installed in: the one holding its Data folder and mission1.pak."));

@@ -133,12 +133,12 @@ fn choice_path() -> std::path::PathBuf {
 
 /// Reads the saved choice: `auto`, or a language's code.
 pub fn load_choice() {
-    let s = std::fs::read_to_string(choice_path()).unwrap_or_default();
+    let s = osiris_vfs::read_to_string(choice_path()).unwrap_or_default();
     set_choice(Language::from_code(&s));
 }
 
 pub fn save_choice() {
-    let _ = std::fs::write(choice_path(), format!("{}\n", choice().map_or("auto", Language::code)));
+    let _ = osiris_vfs::write(choice_path(), format!("{}\n", choice().map_or("auto", Language::code)));
 }
 
 /// The choice after `c` in the Options menu's cycle: automatic, then each language.
@@ -185,9 +185,9 @@ fn read_game_text(data: &Path, choice: Option<Language>) -> Result<(GameText, La
     let sets = language::find_text_sets(data);
     let set = language::choose(&sets, choice).cloned().with_context(|| trf("Pharaoh's string tables (Pharaoh_Text.eng and Pharaoh_MM.eng) are not in {0}.", &[&data.display()]))?;
     let words = choice.or(set.language).unwrap_or(Language::English);
-    let text = TextTable::parse(&std::fs::read(&set.text).with_context(|| set.text.display().to_string())?)?;
-    let messages = MessageTable::parse(&std::fs::read(&set.messages).with_context(|| set.messages.display().to_string())?)?;
-    let read = |name: &str| std::fs::read(set.companion(data, name)).map(|b| osiris_formats::text::decode_cp1252(&b)).unwrap_or_default();
+    let text = TextTable::parse(&osiris_vfs::read(&set.text).with_context(|| set.text.display().to_string())?)?;
+    let messages = MessageTable::parse(&osiris_vfs::read(&set.messages).with_context(|| set.messages.display().to_string())?)?;
+    let read = |name: &str| osiris_vfs::read(set.companion(data, name)).map(|b| osiris_formats::text::decode_cp1252(&b)).unwrap_or_default();
     let phrases = Phrases::parse(&read("eventmsg.txt"));
     let campaign = Campaign::parse(&read("campaign.txt")).unwrap_or_default();
     Ok((GameText { text: Arc::new(text), messages: Arc::new(messages), phrases: Arc::new(phrases), campaign, set }, words))

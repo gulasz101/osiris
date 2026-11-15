@@ -45,7 +45,7 @@ impl SoundPrefs {
     /// The saved settings (lines `music on 35`, and `movies on`), or the defaults.
     pub fn load(user_dir: &Path) -> Self {
         let mut p = Self::default();
-        let Ok(text) = std::fs::read_to_string(user_dir.join(FILE)) else { return p };
+        let Ok(text) = osiris_vfs::read_to_string(user_dir.join(FILE)) else { return p };
         for line in text.lines() {
             let mut it = line.split_whitespace();
             if let (Some("movies"), Some(on)) = (it.clone().next(), it.clone().nth(1)) {
@@ -69,7 +69,7 @@ impl SoundPrefs {
     pub fn save(&self, user_dir: &Path) {
         let line = |name: &str, c: Channel| format!("{name} {} {}\n", if c.on { "on" } else { "off" }, c.volume);
         let text = line("music", self.music) + &line("speech", self.speech) + &line("effects", self.effects) + &line("city", self.city) + if self.movies { "movies on\n" } else { "movies off\n" };
-        let _ = std::fs::write(user_dir.join(FILE), text);
+        let _ = osiris_vfs::write(user_dir.join(FILE), text);
     }
 
     /// The movies' volume: their narration is speech, so the speech setting's.

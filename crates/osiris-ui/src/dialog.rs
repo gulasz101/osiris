@@ -14,7 +14,8 @@ use crate::panel::{self, PanelImages};
 use crate::rich_text::{self, RendererMeasure};
 use osiris_formats::{Message, TextTable};
 use osiris_render::{Renderer, Space, WHITE};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 const BLOCK: f32 = 16.0;
 /// Padding inside the sunken body panel before text starts, matching the border

@@ -1960,7 +1960,8 @@ fn main() -> Result<()> {
     result
 }
 
-fn run(mut args: Args) -> Result<()> {
+/// Run the game with the given arguments.
+pub(crate) fn run(mut args: Args) -> Result<()> {
     // Screenshots stay in the data's own language unless --lang asks, so they don't
     // depend on the player's choice.
     match args.lang {

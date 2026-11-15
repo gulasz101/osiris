@@ -1284,56 +1284,10 @@ impl ApplicationHandler for App {
         };
         self.images = Some(images);
         self.gfx = Some(gfx);
-        let direct = if let Some(map) = &self.args.map {
-            Some((Source::Map(map.clone()), None))
-        } else {
-            self.args.mission.map(|n| (Source::Mission(n), Some(n)))
-        };
-        if let Some(path) = self.args.replay.clone() {
-            self.watch_replay(&path);
-        }
-        match direct {
-            _ if self.screen.is_some() => {}
-            Some((Source::Map(p), _)) => {
-                self.start_map(p);
-                if self.screen.is_none() {
-                    self.screen = Some(Screen::Menu(self.menu()));
-                }
-                self.run_start_script();
-            }
-            Some((source, mission)) => match new_world(&self.assets, &source, load_difficulty()) {
-                Ok(world) => {
-                    self.start(world, mission);
-                    self.run_start_script();
-                }
-                Err(e) => {
-                    self.status = Some((format!("{e}"), 5.0));
-                    self.screen = Some(Screen::Menu(self.menu()));
-                }
-            },
-            None => {
-                let mut menu = self.menu();
-                if self.family.is_empty() {
-                    // No family chosen yet (or this is a fresh install): gate on the
-                    // registry before the rest of the menu is reachable.
-                    menu.open_page("family");
-                }
-                // The original opens with its intro movie at every launch
-                // (FUN_00413ed0); a --script run goes without.
-                if self.args.script.is_none() {
-                    self.play_movie(movie::INTRO, Screen::Menu(menu));
-                } else {
-                    self.screen = Some(Screen::Menu(menu));
-                }
-            }
-        }
-        if let Some(a) = &self.audio
-            && !matches!(self.screen, Some(Screen::Movie(..)))
-        {
-            a.update_music(0);
-        }
+        self.finish_start(_event_loop);
     }
 
+    /// What happens after graphics are ready: start the right screen.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let Some(scale) = self.gfx.as_ref().map(|g| g.scale()) else { return };
         let at = [(self.cursor.0 / scale) as f32, (self.cursor.1 / scale) as f32];
@@ -1610,6 +1564,58 @@ impl ApplicationHandler for App {
 }
 
 impl App {
+    /// What happens after graphics are ready: start the right screen.
+    fn finish_start(&mut self, event_loop: &ActiveEventLoop) {
+        let direct = if let Some(map) = &self.args.map {
+            Some((Source::Map(map.clone()), None))
+        } else {
+            self.args.mission.map(|n| (Source::Mission(n), Some(n)))
+        };
+        if let Some(path) = self.args.replay.clone() {
+            self.watch_replay(&path);
+        }
+        match direct {
+            _ if self.screen.is_some() => {}
+            Some((Source::Map(p), _)) => {
+                self.start_map(p);
+                if self.screen.is_none() {
+                    self.screen = Some(Screen::Menu(self.menu()));
+                }
+                self.run_start_script();
+            }
+            Some((source, mission)) => match new_world(&self.assets, &source, load_difficulty()) {
+                Ok(world) => {
+                    self.start(world, mission);
+                    self.run_start_script();
+                }
+                Err(e) => {
+                    self.status = Some((format!("{e}"), 5.0));
+                    self.screen = Some(Screen::Menu(self.menu()));
+                }
+            },
+            None => {
+                let mut menu = self.menu();
+                if self.family.is_empty() {
+                    // No family chosen yet (or this is a fresh install): gate on the
+                    // registry before the rest of the menu is reachable.
+                    menu.open_page("family");
+                }
+                // The original opens with its intro movie at every launch
+                // (FUN_00413ed0); a --script run goes without.
+                if self.args.script.is_none() {
+                    self.play_movie(movie::INTRO, Screen::Menu(menu));
+                } else {
+                    self.screen = Some(Screen::Menu(menu));
+                }
+            }
+        }
+        if let Some(a) = &self.audio
+            && !matches!(self.screen, Some(Screen::Movie(..)))
+        {
+            a.update_music(0);
+        }
+    }
+
     fn redraw(&mut self) {
         let now = web_time::Instant::now();
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);

@@ -38,11 +38,53 @@ pub fn path(data: &Path, name: &str) -> Option<PathBuf> {
     std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().to_lowercase() == want))
 }
 
+/// Opens movie `name` from the game data and starts it (its sound on `audio` at
+/// `volume`), or `None` if it isn't there.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn start(data: &Path, name: &str, audio: Option<&Audio>, volume: f32) -> Option<Movie> {
+    let path = path(data, name)?;
+    let movie = match osiris_bink::Movie::open(&path) {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("movie {}: {e}", path.display());
+            return None;
+        }
+    };
+    let sound = match (audio, movie.audio_format()) {
+        (Some(a), Some((rate, channels))) => Some(a.play_stream(rate, channels, volume)),
+        _ => None,
+    };
+    Some(Movie::run(name, movie, sound))
+}
+
+/// Opens movie `name` from the game data and starts it (its sound on `audio` at
+/// `volume`), or `None` if it isn't there.
+#[cfg(target_arch = "wasm32")]
+pub fn start(_data: &Path, name: &str, _audio: Option<&Audio>, _volume: f32) -> Option<Movie> {
+    log::info!("movies are not played in the browser yet: {name}");
+    None
+}
+
+/// Opens movie `name` without sound, for screenshots.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn silent(data: &Path, name: &str) -> Option<Movie> {
+    let movie = osiris_bink::Movie::open(path(data, name)?).ok()?;
+    Some(Movie::run(name, movie, None))
+}
+
+/// Opens movie `name` without sound, for screenshots.
+#[cfg(target_arch = "wasm32")]
+pub fn silent(_data: &Path, name: &str) -> Option<Movie> {
+    log::info!("movies are not played in the browser yet: {name}");
+    None
+}
+
 enum Decoded {
     Frame(usize, Vec<u8>),
     End,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Movie {
     width: u32,
     height: u32,
@@ -63,42 +105,11 @@ pub struct Movie {
     pub done: bool,
 }
 
+#[cfg(target_arch = "wasm32")]
+pub struct Movie {}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl Movie {
-    /// Opens movie `name` from the game data and starts it (its sound on `audio` at
-    /// `volume`), or `None` if it isn't there.
-    pub fn start(data: &Path, name: &str, audio: Option<&Audio>, volume: f32) -> Option<Movie> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            log::info!("movies are not played in the browser yet: {name}");
-            return None;
-        }
-        let path = path(data, name)?;
-        let movie = match osiris_bink::Movie::open(&path) {
-            Ok(m) => m,
-            Err(e) => {
-                log::warn!("movie {}: {e}", path.display());
-                return None;
-            }
-        };
-        let sound = match (audio, movie.audio_format()) {
-            (Some(a), Some((rate, channels))) => Some(a.play_stream(rate, channels, volume)),
-            _ => None,
-        };
-        Some(Movie::run(name, movie, sound))
-    }
-
-    /// Opens movie `name` without sound, for screenshots.
-    pub fn silent(data: &Path, name: &str) -> Option<Movie> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            log::info!("movies are not played in the browser yet: {name}");
-            return None;
-        }
-        let movie = osiris_bink::Movie::open(path(data, name)?).ok()?;
-        Some(Movie::run(name, movie, None))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     fn run(name: &str, mut movie: osiris_bink::Movie<std::io::BufReader<std::fs::File>>, sound: Option<StreamSound>) -> Movie {
         let (width, height, fps, frames) = (movie.width(), movie.height(), movie.fps(), movie.frames() as usize);
         let (tx, rx) = sync_channel(AHEAD);
@@ -266,6 +277,6 @@ mod tests {
     #[test]
     fn a_missing_movie_is_none() {
         assert!(path(Path::new("/nonexistent"), INTRO).is_none());
-        assert!(Movie::silent(Path::new("/nonexistent"), INTRO).is_none());
+        assert!(silent(Path::new("/nonexistent"), INTRO).is_none());
     }
 }

@@ -641,7 +641,7 @@ impl App {
     fn play_movie(&mut self, name: &str, then: Screen) {
         let args = &self.args;
         let direct = args.map.is_some() || args.mission.is_some() || args.replay.is_some() || args.script.is_some();
-        let started = if self.sound.movies && !direct { movie::Movie::start(&self.assets.data, name, self.audio.as_deref(), self.sound.movie_volume()) } else { None };
+        let started = if self.sound.movies && !direct { movie::start(&self.assets.data, name, self.audio.as_deref(), self.sound.movie_volume()) } else { None };
         match started {
             Some(m) => {
                 log::info!("playing movie {name}");
@@ -2000,7 +2000,7 @@ fn run(mut args: Args) -> Result<()> {
             _ => script::ScriptView { keep_dialogs: args.replay.is_none(), ..Default::default() },
         };
         if let Some((name, seconds)) = &view.movie {
-            let mut m = movie::Movie::silent(&data, name).with_context(|| format!("no movie {name} in {}", data.display()))?;
+            let mut m = movie::silent(&data, name).with_context(|| format!("no movie {name} in {}", data.display()))?;
             m.seek_blocking(*seconds);
             return gfx::screenshot(library, args.size, out, |r| m.draw(r));
         }
@@ -2066,7 +2066,7 @@ fn run(mut args: Args) -> Result<()> {
                 let name = choice.as_ref().and_then(|c| period_movie(c, p.period(&assets.campaign)));
                 println!("menuplay: {choice:?} plays {}", name.unwrap_or("no movie"));
                 if let Some(name) = name {
-                    let mut m = movie::Movie::silent(&data, name).with_context(|| format!("no movie {name} in {}", data.display()))?;
+                    let mut m = movie::silent(&data, name).with_context(|| format!("no movie {name} in {}", data.display()))?;
                     m.seek_blocking(seconds);
                     return gfx::screenshot(library, args.size, out, |r| m.draw(r));
                 }

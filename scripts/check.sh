@@ -11,6 +11,9 @@ branch=$(git rev-parse --abbrev-ref HEAD)
 echo "== no-game-files"
 scripts/no-game-files.sh
 
+echo "== no-direct-fs"
+scripts/no-direct-fs.sh
+
 echo "== cargo test"
 cargo test --workspace --quiet
 

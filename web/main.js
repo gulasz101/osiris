@@ -1,9 +1,24 @@
-import init from "./pkg/osiris.js";
+import init, {
+    debug_write_user,
+    debug_read_user,
+    mount_exact,
+    mount_file,
+    mount_user_file,
+    start_game,
+} from "./pkg/osiris.js";
 
 const folderInput = document.getElementById("folder");
 const startDiv = document.getElementById("start");
 const canvas = document.getElementById("osiris");
 const status = document.getElementById("status");
+
+// Expose wasm functions on window so the smoke test can call them via page.evaluate().
+globalThis.debug_write_user = debug_write_user;
+globalThis.debug_read_user = debug_read_user;
+globalThis.mount_exact = mount_exact;
+globalThis.mount_file = mount_file;
+globalThis.mount_user_file = mount_user_file;
+globalThis.start_game = start_game;
 
 try {
     await init();
@@ -11,6 +26,16 @@ try {
 } catch (err) {
     console.error(err);
     status.textContent = "Error: " + err.message;
+}
+
+// Restore any persisted user files now that the wasm runtime is initialised.
+try {
+    await osirisStore.open();
+    const stored = await osirisStore.loadAll();
+    for (const [p, b] of stored) mount_user_file(p, b);
+    console.log("osiris web: restored " + stored.length + " user files");
+} catch (err) {
+    console.warn("osiris web: persistence unavailable", err);
 }
 
 folderInput.addEventListener("change", async () => {

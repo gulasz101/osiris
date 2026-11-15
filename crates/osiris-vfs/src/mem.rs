@@ -3,8 +3,21 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// A change to the file system that occurred under a watched prefix.
+pub use self::change::Change;
+mod change {
+    /// A single change recorded by [`crate::MemFs::watch`].
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Change {
+        /// A file was written or overwritten.
+        Put(String, Vec<u8>),
+        /// A file was deleted.
+        Delete(String),
+    }
+}
+
 /// A single entry in the in-memory file store.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Entry {
     /// The original path as given at mount/write time (for DirEntry display).
     original: String,
@@ -28,6 +41,10 @@ pub struct MemFs {
     dirs: BTreeSet<String>,
     /// Monotonic counter for `modified` timestamps.
     seq: u64,
+    /// Normalised prefix being watched for changes (e.g. "/user"), or `None`.
+    watch_prefix: Option<String>,
+    /// Recorded changes since the last call to [`Self::take_changes`].
+    changes: Vec<Change>,
 }
 
 // ── Normalisation ────────────────────────────────────────────────────
@@ -50,6 +67,16 @@ fn normalise(path: &str) -> String {
     }
 
     resolved.join("/").to_ascii_lowercase()
+}
+
+/// Check whether `normalized_path` is strictly under `normalized_prefix`.
+/// Both strings must already be normalised (lower-cased, no trailing slash).
+fn is_under(normalized_path: &str, normalized_prefix: &str) -> bool {
+    if normalized_path == normalized_prefix {
+        return false;
+    }
+    normalized_path.starts_with(normalized_prefix)
+        && normalized_path.as_bytes().get(normalized_prefix.len()) == Some(&b'/')
 }
 
 /// Return all parent directory keys for a normalised path (excludes the final component).
@@ -96,12 +123,19 @@ impl MemFs {
             norm.clone(),
             Entry {
                 original: path.to_owned(),
-                data: Arc::from(data.into_boxed_slice()),
+                data: Arc::from(data.clone().into_boxed_slice()),
                 seq: self.seq,
             },
         );
         for d in parent_dirs(&norm) {
             self.dirs.insert(d);
+        }
+
+        // Record change if watching and the path is under the watched prefix.
+        if let Some(ref prefix) = self.watch_prefix {
+            if is_under(&norm, prefix) {
+                self.changes.push(Change::Put(path.to_owned(), data));
+            }
         }
     }
 
@@ -118,25 +152,99 @@ impl MemFs {
         self.files.get(&normalise(path)).map(|e| e.data.clone())
     }
 
-    /// Rename a file. Returns false if source does not exist.
+    /// Rename a file or directory. Returns false if source does not exist.
     pub fn rename(&mut self, from: &str, to: &str) -> bool {
         let from_norm = normalise(from);
         let to_norm = normalise(to);
-        if let Some(entry) = self.files.remove(&from_norm) {
-            // Remove old parent dirs (they'll be re-added below).
-            self.dirs.remove(&from_norm);
+
+        // Check whether `from` is a directory (has files under it).
+        let has_children = self.files.keys().any(|k| is_under(k, &from_norm));
+
+        if has_children {
+            // Directory rename: move all files and directories under `from` to under `to`.
+            let children: Vec<(String, Entry)> = self
+                .files
+                .iter()
+                .filter(|(k, _)| is_under(k, &from_norm))
+                .map(|(k, v)| (k.clone(), (*v).clone()))
+                .collect();
+
+            // Record changes for watched files.
+            if let Some(ref watch) = self.watch_prefix {
+                for (old_key, entry) in &children {
+                    let new_key = format!("{}{}", to_norm, &old_key[from_norm.len()..]);
+                    if is_under(old_key, watch) {
+                        self.changes.push(Change::Delete(entry.original.clone()));
+                    }
+                    if is_under(&new_key, watch) {
+                        // Compute the new "original" path from the target directory name
+                        // and the relative portion of the old key.
+                        let new_original = format!(
+                            "{}{}",
+                            to,
+                            &old_key[from_norm.len()..]
+                                .replace('/', std::path::MAIN_SEPARATOR_STR)
+                        );
+                        self.changes.push(Change::Put(new_original, entry.data.as_ref().to_vec()));
+                    }
+                }
+            }
+
+            // Move files.
+            for (old_key, entry) in children {
+                let new_key = format!("{}{}", to_norm, &old_key[from_norm.len()..]);
+                self.seq += 1;
+                self.files.insert(
+                    new_key.clone(),
+                    Entry {
+                        original: entry.original,
+                        data: entry.data,
+                        seq: self.seq,
+                    },
+                );
+                self.files.remove(&old_key);
+            }
+
+            // Move directories.
+            let dir_children: Vec<String> = self
+                .dirs
+                .iter()
+                .filter(|k| is_under(k, &from_norm))
+                .cloned()
+                .collect();
+            for old_dir in dir_children {
+                let new_dir = format!("{}{}", to_norm, &old_dir[from_norm.len()..]);
+                self.dirs.remove(&old_dir);
+                self.dirs.insert(new_dir);
+            }
+
+            true
+        } else if self.files.contains_key(&from_norm) {
+            // Single-file rename (existing behaviour).
+            let entry = self.files.remove(&from_norm).unwrap();
             self.seq += 1;
             self.files.insert(
                 to_norm.clone(),
                 Entry {
-                    original: entry.original,
-                    data: entry.data,
+                    original: entry.original.clone(),
+                    data: entry.data.clone(),
                     seq: self.seq,
                 },
             );
             for d in parent_dirs(&to_norm) {
                 self.dirs.insert(d);
             }
+
+            // Record changes if watching.
+            if let Some(ref watch) = self.watch_prefix {
+                if is_under(&from_norm, watch) {
+                    self.changes.push(Change::Delete(entry.original));
+                }
+                if is_under(&to_norm, watch) {
+                    self.changes.push(Change::Put(to.to_owned(), entry.data.as_ref().to_vec()));
+                }
+            }
+
             true
         } else {
             false
@@ -145,32 +253,52 @@ impl MemFs {
 
     /// Remove a single file. Returns false if missing.
     pub fn remove_file(&mut self, path: &str) -> bool {
-        self.files.remove(&normalise(path)).is_some()
+        let norm = normalise(path);
+        if let Some(entry) = self.files.remove(&norm) {
+            // Record change if watching and the path is under the watched prefix.
+            if let Some(ref prefix) = self.watch_prefix {
+                if is_under(&norm, prefix) {
+                    self.changes.push(Change::Delete(entry.original));
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     /// Recursively remove everything under `path` (files and directories).
     pub fn remove_dir_all(&mut self, path: &str) {
-        let prefix = normalise(path);
-        // Remove files whose key starts with the directory prefix.
-        let to_remove: Vec<String> = self
+        let norm = normalise(path);
+
+        // Collect files under this directory BEFORE removal.
+        let to_remove: Vec<(String, Entry)> = self
             .files
-            .keys()
-            .filter(|k| {
-                if **k == prefix {
-                    return false;
-                }
-                k.starts_with(&prefix) && k[prefix.len()..].starts_with('/')
-            })
-            .cloned()
+            .iter()
+            .filter(|(k, _)| is_under(k, &norm))
+            .map(|(k, v)| (k.clone(), (*v).clone()))
             .collect();
-        for k in to_remove {
+
+        // Record changes for watched files.
+        if let Some(ref watch) = self.watch_prefix {
+            for (key, entry) in &to_remove {
+                if is_under(key, watch) {
+                    self.changes.push(Change::Delete(entry.original.clone()));
+                }
+            }
+        }
+
+        // Actually remove files.
+        let to_remove_keys: Vec<String> = to_remove.iter().map(|(k, _)| k.clone()).collect();
+        for k in to_remove_keys {
             self.files.remove(&k);
         }
+
         // Remove directories whose key starts with the prefix (but not the dir itself).
         let to_remove_dirs: Vec<String> = self
             .dirs
             .iter()
-            .filter(|k| **k != prefix && k.starts_with(&prefix))
+            .filter(|k| is_under(k, &norm))
             .cloned()
             .collect();
         for d in to_remove_dirs {
@@ -246,6 +374,21 @@ impl MemFs {
     /// Check if a normalised key is a file.
     pub fn is_file(&self, path: &str) -> bool {
         self.files.contains_key(&normalise(path))
+    }
+
+    /// Record changes to files whose path starts with `prefix` (case-insensitive).
+    ///
+    /// After calling this method every write, delete and rename under the prefix
+    /// is recorded.  Call [`Self::take_changes`] to consume them.
+    pub fn watch(&mut self, prefix: &str) {
+        let norm = normalise(prefix);
+        self.watch_prefix = Some(norm.clone());
+        self.changes.clear();
+    }
+
+    /// Return and clear the recorded changes, oldest first.
+    pub fn take_changes(&mut self) -> Vec<Change> {
+        std::mem::take(&mut self.changes)
     }
 
     /// Check if a normalised key is a directory.
@@ -410,5 +553,177 @@ mod tests {
         let time = SystemTime::UNIX_EPOCH + Duration::from_secs(seq);
         // Just verify it doesn't panic and is after epoch.
         assert!(time > SystemTime::UNIX_EPOCH);
+    }
+
+    // ── Change-tracking tests ───────────────────────────────────────
+
+    #[test]
+    fn write_records_put_under_prefix() {
+        let mut fs = MemFs::default();
+        fs.watch("/user");
+        fs.write("/user/save.sav", b"save data".to_vec());
+        let changes = fs.take_changes();
+        assert_eq!(changes.len(), 1);
+        match &changes[0] {
+            Change::Put(path, data) => {
+                assert_eq!(path, "/user/save.sav");
+                assert_eq!(data.as_slice(), b"save data");
+            }
+            Change::Delete(_) => panic!("expected Put"),
+        }
+    }
+
+    #[test]
+    fn remove_file_records_delete() {
+        let mut fs = MemFs::default();
+        fs.write("/user/save.sav", b"save data".to_vec());
+        fs.watch("/user");
+        assert!(fs.remove_file("/user/save.sav"));
+        let changes = fs.take_changes();
+        assert_eq!(changes.len(), 1);
+        match &changes[0] {
+            Change::Delete(path) => assert_eq!(path, "/user/save.sav"),
+            Change::Put(_, _) => panic!("expected Delete"),
+        }
+    }
+
+    #[test]
+    fn remove_file_missing_records_nothing() {
+        let mut fs = MemFs::default();
+        fs.watch("/user");
+        assert!(!fs.remove_file("/user/nope.txt"));
+        assert!(fs.take_changes().is_empty());
+    }
+
+    #[test]
+    fn remove_dir_all_records_deletes() {
+        let mut fs = MemFs::default();
+        fs.write("/user/a.txt", b"a".to_vec());
+        fs.write("/user/b.txt", b"b".to_vec());
+        fs.write("/user/sub/c.txt", b"c".to_vec());
+        fs.watch("/user");
+        fs.remove_dir_all("/user");
+        let changes = fs.take_changes();
+        assert_eq!(changes.len(), 3);
+        // All three should be Deletes.
+        for c in &changes {
+            match c {
+                Change::Delete(_) => {}
+                _ => panic!("expected Delete, got {:?}", c),
+            }
+        }
+    }
+
+    #[test]
+    fn rename_file_records_both_sides() {
+        let mut fs = MemFs::default();
+        fs.write("/user/old.txt", b"content".to_vec());
+        fs.watch("/user");
+        assert!(fs.rename("/user/old.txt", "/user/new.txt"));
+        let changes = fs.take_changes();
+        assert_eq!(changes.len(), 2);
+        match &changes[0] {
+            Change::Delete(path) => assert_eq!(path, "/user/old.txt"),
+            _ => panic!("expected Delete, got {:?}", changes[0]),
+        }
+        match &changes[1] {
+            Change::Put(path, data) => {
+                assert_eq!(path, "/user/new.txt");
+                assert_eq!(data.as_slice(), b"content");
+            }
+            _ => panic!("expected Put, got {:?}", changes[1]),
+        }
+    }
+
+    #[test]
+    fn rename_one_side_under_prefix() {
+        let mut fs = MemFs::default();
+        fs.write("/user/file.txt", b"data".to_vec());
+        fs.watch("/user");
+        // Moving from /user to outside — only Delete recorded.
+        assert!(fs.rename("/user/file.txt", "/other/file.txt"));
+        let changes = fs.take_changes();
+        assert_eq!(changes.len(), 1);
+        match &changes[0] {
+            Change::Delete(path) => assert_eq!(path, "/user/file.txt"),
+            _ => panic!("expected Delete"),
+        }
+
+        // Reset and test the opposite direction.
+        let mut fs2 = MemFs::default();
+        fs2.write("/other/file.txt", b"data".to_vec());
+        fs2.watch("/user");
+        assert!(fs2.rename("/other/file.txt", "/user/file.txt"));
+        let changes2 = fs2.take_changes();
+        assert_eq!(changes2.len(), 1);
+        match &changes2[0] {
+            Change::Put(path, data) => {
+                assert_eq!(path, "/user/file.txt");
+                assert_eq!(data.as_slice(), b"data");
+            }
+            _ => panic!("expected Put"),
+        }
+    }
+
+    #[test]
+    fn mixed_case_paths_recorded_correctly() {
+        let mut fs = MemFs::default();
+        // Watch first, then write with mixed case.
+        fs.watch("/user");
+        fs.write("/User/Save.SAV", b"mixed".to_vec());
+        let changes = fs.take_changes();
+        assert_eq!(changes.len(), 1);
+        match &changes[0] {
+            Change::Put(path, data) => {
+                // The original path casing is preserved.
+                assert_eq!(path, "/User/Save.SAV");
+                assert_eq!(data.as_slice(), b"mixed");
+            }
+            _ => panic!("expected Put"),
+        }
+    }
+
+    #[test]
+    fn nothing_recorded_without_watch() {
+        let mut fs = MemFs::default();
+        // No watch call — changes should not be recorded.
+        fs.write("/user/file.txt", b"x".to_vec());
+        assert!(fs.take_changes().is_empty());
+
+        let mut fs2 = MemFs::default();
+        fs2.watch("/other"); // watching a different prefix
+        fs2.write("/user/file.txt", b"x".to_vec());
+        assert!(fs2.take_changes().is_empty());
+    }
+
+    #[test]
+    fn mount_and_create_dir_record_nothing() {
+        let mut fs = MemFs::default();
+        fs.watch("/user");
+        fs.mount("/user/mounted.dat", b"mount data".to_vec());
+        fs.create_dir_all("/user/some/dir");
+        assert!(fs.take_changes().is_empty());
+    }
+
+    #[test]
+    fn take_changes_clears_and_returns_oldest_first() {
+        let mut fs = MemFs::default();
+        fs.watch("/user");
+        fs.write("/user/a.txt", b"a".to_vec());
+        fs.write("/user/b.txt", b"b".to_vec());
+
+        let c1 = fs.take_changes();
+        assert_eq!(c1.len(), 2);
+        match &c1[0] {
+            Change::Put(path, _) => assert_eq!(path, "/user/a.txt"),
+            _ => panic!("expected Put for a.txt"),
+        }
+        match &c1[1] {
+            Change::Put(path, _) => assert_eq!(path, "/user/b.txt"),
+            _ => panic!("expected Put for b.txt"),
+        }
+
+        // Second take should be empty.
+        assert!(fs.take_changes().is_empty());
     }
 }

@@ -5,14 +5,14 @@
 //! [`mount`] before the game starts.
 
 mod mem;
-pub use mem::{DirEntry, MemFs};
+pub use mem::{Change, DirEntry, MemFs};
 
 use std::io::{self};
 use std::path::Path;
 use std::time::SystemTime;
 
 #[cfg(target_arch = "wasm32")]
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 #[cfg(target_arch = "wasm32")]
 use std::thread_local;
 
@@ -151,6 +151,7 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
     let path = path.as_ref();
     FS.with(|fs| fs.borrow_mut().write(path.to_str().unwrap_or_default(), contents.as_ref().to_vec()));
+    flush();
     Ok(())
 }
 
@@ -166,12 +167,14 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
 #[cfg(target_arch = "wasm32")]
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref();
-    FS.with(|fs| {
+    let result = FS.with(|fs| {
         if !fs.borrow_mut().remove_file(path.to_str().unwrap_or_default()) {
             return Err(io::ErrorKind::NotFound.into());
         }
         Ok(())
-    })
+    });
+    flush();
+    result
 }
 
 /// Recursively remove a directory and all its contents.
@@ -179,6 +182,7 @@ pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
 pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref();
     FS.with(|fs| fs.borrow_mut().remove_dir_all(path.to_str().unwrap_or_default()));
+    flush();
     Ok(())
 }
 
@@ -187,7 +191,7 @@ pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let from = from.as_ref();
     let to = to.as_ref();
-    FS.with(|fs| {
+    let result = FS.with(|fs| {
         if !fs.borrow_mut().rename(
             from.to_str().unwrap_or_default(),
             to.to_str().unwrap_or_default(),
@@ -195,7 +199,9 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
             return Err(io::ErrorKind::NotFound.into());
         }
         Ok(())
-    })
+    });
+    flush();
+    result
 }
 
 /// Read the direct children of a directory, sorted by file name.
@@ -268,4 +274,41 @@ pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
 #[cfg(target_arch = "wasm32")]
 pub fn mount(path: &str, bytes: Vec<u8>) {
     FS.with(|fs| fs.borrow_mut().mount(path, bytes));
+}
+
+// ── Change hook (browser only) ─────────────────────────────────────
+
+#[cfg(target_arch = "wasm32")]
+thread_local! { static HOOK: Cell<Option<fn(Change)>> = Cell::new(None); }
+
+/// Start watching files under `prefix` (e.g. "/user").
+///
+/// This is a convenience wrapper around [`MemFs::watch`] on the global store.
+#[cfg(target_arch = "wasm32")]
+pub fn watch(prefix: &str) {
+    FS.with(|fs| fs.borrow_mut().watch(prefix));
+}
+
+/// Set (or clear) the change callback.
+///
+/// The hook is called for every write, delete and rename under a watched prefix.
+#[cfg(target_arch = "wasm32")]
+pub fn set_change_hook(hook: fn(Change)) {
+    HOOK.with(|h| h.set(Some(hook)));
+}
+
+/// Flush recorded changes to the hook.
+///
+/// Takes changes from the store and calls the hook for each one **outside**
+/// the borrow, so the hook can safely read back from the store without panicking.
+#[cfg(target_arch = "wasm32")]
+fn flush() {
+    let changes: Vec<Change> = FS.with(|fs| fs.borrow_mut().take_changes());
+    HOOK.with(|h| {
+        if let Some(callback) = h.get() {
+            for change in changes {
+                callback(change);
+            }
+        }
+    });
 }

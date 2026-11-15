@@ -1773,6 +1773,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "osiris-vfs"
+version = "0.1.15"
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

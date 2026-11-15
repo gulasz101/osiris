@@ -1,0 +1,8 @@
+[package]
+name = "osiris-vfs"
+description = "Virtual file system: std::fs on desktop, in-memory store in the browser"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]

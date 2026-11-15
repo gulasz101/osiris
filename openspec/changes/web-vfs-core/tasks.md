@@ -1,8 +1,8 @@
 # Tasks: web-vfs-core
 
 ## 1. The crate
-- [ ] 1.1 Create `crates/osiris-vfs` with `Cargo.toml` and `src/mem.rs` (`MemFs` + its tests, see design.md). Check: `cargo test -p osiris-vfs` passes with at least 9 tests.
-- [ ] 1.2 Write `src/lib.rs`: the public API, desktop bodies on `std::fs`, browser bodies on the thread-local `MemFs`, and `mount`. Check: `cargo test -p osiris-vfs` passes and `cargo check --target wasm32-unknown-unknown -p osiris-vfs` exits 0.
+- [x] 1.1 Create `crates/osiris-vfs` with `Cargo.toml` and `src/mem.rs` (`MemFs` + its tests, see design.md). Check: `cargo test -p osiris-vfs` passes with at least 9 tests.
+- [x] 1.2 Write `src/lib.rs`: the public API, desktop bodies on `std::fs`, browser bodies on the thread-local `MemFs`, and `mount`. Check: `cargo test -p osiris-vfs` passes and `cargo check --target wasm32-unknown-unknown -p osiris-vfs` exits 0.
 
 ## 2. Game-data crates
 - [ ] 2.1 `osiris-formats` uses `osiris_vfs`. Check: `scripts/no-direct-fs.sh crates/osiris-formats/src` prints `no-direct-fs: OK` and `cargo test -p osiris-formats` passes.

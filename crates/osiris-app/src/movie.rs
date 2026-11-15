@@ -4,8 +4,10 @@
 //! A movie missing from the install (or one that won't open) is skipped without a
 //! word, and the player can turn movies off (Options > Sound).
 
+// Audio is only used in non-wasm code but needed for the function signature on all targets.
 #[cfg(not(target_arch = "wasm32"))]
-use osiris_audio::{Audio, StreamSound};
+use osiris_audio::StreamSound;
+use osiris_audio::Audio;
 use osiris_render::{DynamicHandle, Renderer, Space};
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
@@ -107,6 +109,14 @@ pub struct Movie {
 
 #[cfg(target_arch = "wasm32")]
 pub struct Movie {}
+
+#[cfg(target_arch = "wasm32")]
+impl Movie {
+    pub fn skip(&mut self) {}
+    pub fn update(&mut self) {}
+    pub fn seek_blocking(&mut self, _seconds: f64) {}
+    pub fn draw(&mut self, _r: &mut Renderer) {}
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Movie {

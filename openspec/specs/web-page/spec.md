@@ -1,7 +1,7 @@
 # web-page Specification
 
 ## Purpose
-TBD - created by archiving change web-page. Update Purpose after archive.
+Serve the HTML page that loads the Osiris wasm module, provides a folder picker for the player's Pharaoh installation, and starts the game in the browser.
 
 ## Requirements
 

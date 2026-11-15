@@ -29,6 +29,7 @@ rfd = "0.17"
 web-time = "1.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30", features = ["webgl"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"

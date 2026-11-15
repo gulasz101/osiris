@@ -121,6 +121,10 @@ async fn adapter(
 async fn device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     // The atlas pages are 4096 square; ask for no more than the adapter has, so an
     // OpenGL or software adapter below the default limits still gives a device.
+    #[cfg(target_arch = "wasm32")]
+    let required_limits =
+        wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
+    #[cfg(not(target_arch = "wasm32"))]
     let required_limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
     adapter
         .request_device(&wgpu::DeviceDescriptor { required_limits, ..Default::default() })

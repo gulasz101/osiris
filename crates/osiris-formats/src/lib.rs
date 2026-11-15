@@ -46,7 +46,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) fn read_file(path: &std::path::Path) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|source| Error::Io {
+    osiris_vfs::read(path).map_err(|source| Error::Io {
         path: path.to_owned(),
         source,
     })

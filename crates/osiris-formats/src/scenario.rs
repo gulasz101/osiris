@@ -537,7 +537,7 @@ impl Scenario {
     pub fn save_map(&self, template: &std::path::Path, path: &std::path::Path) -> Result<()> {
         let file = ChunkFile::open(template, crate::chunks::Layout::Map)?;
         let bytes = self.to_chunk_file(file)?.to_bytes();
-        std::fs::write(path, bytes).map_err(|source| crate::Error::Io {
+        osiris_vfs::write(path, bytes).map_err(|source| crate::Error::Io {
             path: path.to_owned(),
             source,
         })

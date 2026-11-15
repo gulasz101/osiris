@@ -69,11 +69,11 @@ impl ImageLibrary {
             let has_system_slots = sg3.group_starts.first() == Some(&0);
             packs.push(Pack { base, name: name.to_owned(), dir: data_dir.to_owned(), sg3: OnceLock::from(Some(sg3)), has_system_slots });
         }
-        let mut extras: Vec<String> = std::fs::read_dir(data_dir)
+        let mut extras: Vec<String> = osiris_vfs::read_dir(data_dir)
             .map(|rd| {
-                rd.filter_map(|e| e.ok())
+                rd.into_iter()
                     .filter_map(|e| {
-                        let p = e.path();
+                        let p = e.path_buf();
                         p.extension()?.eq_ignore_ascii_case("sg3").then(|| p.file_stem()?.to_str().map(str::to_owned))?
                     })
                     .filter(|n| !CORE_PACKS.iter().any(|(c, _)| c.eq_ignore_ascii_case(n)))

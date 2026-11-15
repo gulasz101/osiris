@@ -170,7 +170,7 @@ impl Sg3 {
     /// packs hold only external images); decoding an internal image then fails.
     pub fn open(dir: &Path, name: &str) -> Result<Self> {
         let index = read_file(&dir.join(format!("{name}.sg3")))?;
-        let data = std::fs::read(dir.join(format!("{name}.555"))).unwrap_or_default();
+        let data = osiris_vfs::read(dir.join(format!("{name}.555"))).unwrap_or_default();
         Self::parse(name, &index, data, dir.to_owned())
     }
 
@@ -316,7 +316,7 @@ impl Sg3 {
             let mut cache = self.external.lock().unwrap();
             let file = cache.entry(name.clone()).or_insert_with(|| {
                 let stem = Path::new(&name).with_extension("555");
-                std::fs::read(self.dir.join(stem)).ok()
+                osiris_vfs::read(self.dir.join(stem)).ok()
             });
             let file = file.as_deref().ok_or_else(|| {
                 Error::Invalid(format!(

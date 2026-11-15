@@ -6,4 +6,5 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+osiris-vfs = { path = "../osiris-vfs" }
 thiserror = "2"

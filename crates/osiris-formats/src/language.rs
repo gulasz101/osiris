@@ -147,10 +147,14 @@ impl TextSet {
 /// `dir`'s entry named `name`, matched without regard to case.
 pub fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     let exact = dir.join(name);
-    if exact.is_file() {
+    if osiris_vfs::is_file(&exact) {
         return Some(exact);
     }
-    std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).map(|e| e.path()).find(|p| p.is_file() && p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name)))
+    osiris_vfs::read_dir(dir).ok().and_then(|rd| {
+        rd.into_iter()
+            .find(|e| e.is_file() && e.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+            .map(|e| e.path_buf())
+    })
 }
 
 /// Every `Pharaoh_Text.<ext>` with its `Pharaoh_MM.<ext>` in `data` and in the
@@ -158,15 +162,15 @@ pub fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
 /// language. Reads each text table to tell its language.
 pub fn find_text_sets(data: &Path) -> Vec<TextSet> {
     let mut dirs = vec![data.to_path_buf()];
-    if let Ok(rd) = std::fs::read_dir(data) {
-        let mut subs: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    if let Ok(rd) = osiris_vfs::read_dir(data) {
+        let mut subs: Vec<PathBuf> = rd.into_iter().map(|e| e.path_buf()).filter(|p| osiris_vfs::is_dir(&p)).collect();
         subs.sort();
         dirs.extend(subs);
     }
     let mut sets = Vec::new();
     for dir in dirs {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        let mut files: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_file()).collect();
+        let Ok(rd) = osiris_vfs::read_dir(&dir) else { continue };
+        let mut files: Vec<PathBuf> = rd.into_iter().map(|e| e.path_buf()).filter(|e| e.is_file()).collect();
         files.sort();
         for text in &files {
             let Some(name) = text.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
@@ -176,7 +180,7 @@ pub fn find_text_sets(data: &Path) -> Vec<TextSet> {
                 continue;
             }
             let Some(messages) = find_file(&dir, &format!("Pharaoh_MM.{ext}")) else { continue };
-            let Some(table) = std::fs::read(text).ok().and_then(|b| TextTable::parse(&b).ok()) else { continue };
+            let Some(table) = osiris_vfs::read(text).ok().and_then(|b| TextTable::parse(&b).ok()) else { continue };
             let language = detect(&table).or_else(|| Language::from_extension(ext));
             sets.push(TextSet { dir: dir.clone(), text: text.clone(), messages, extension: ext.to_owned(), language });
         }

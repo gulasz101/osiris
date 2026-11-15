@@ -1133,6 +1133,17 @@ impl App {
     }
 }
 
+/// Writes an autosave: to a temporary file first, then rotated into place.
+fn write_autosave(saves: &Path, name: &str, bytes: Vec<u8>) {
+    let _ = std::fs::create_dir_all(saves);
+    let path = autosave_path(saves, name, 1);
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        rotate_autosaves(saves, name);
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
 /// The original saves the city to last.sav as each month begins while Autosave is
 /// on. Osiris keeps the last few autosaves of each city beside its saved game (see
 /// `AUTOSAVES`); at high speeds it saves at most every few seconds, and writes the
@@ -1155,15 +1166,11 @@ fn autosave(game: &game::Game, saves: &Path, last: &mut Option<(i32, web_time::I
             let saves = saves.to_owned();
             let name = w.scenario_name.clone();
             let written = autosave_path(&saves, &name, 1);
-            std::thread::spawn(move || {
-                let _ = std::fs::create_dir_all(&saves);
-                let path = autosave_path(&saves, &name, 1);
-                let tmp = path.with_extension("tmp");
-                if std::fs::write(&tmp, bytes).is_ok() {
-                    rotate_autosaves(&saves, &name);
-                    let _ = std::fs::rename(&tmp, &path);
-                }
-            });
+            #[cfg(not(target_arch = "wasm32"))]
+            std::thread::spawn(move || write_autosave(&saves, &name, bytes));
+            // The browser has no threads; the write is a copy into memory there, so it is quick.
+            #[cfg(target_arch = "wasm32")]
+            write_autosave(&saves, &name, bytes);
             Some(written)
         }
         Some(_) => None,

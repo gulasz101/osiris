@@ -425,27 +425,42 @@ mod tests {
     }
 }
 
-type FileDecoder = rodio::Decoder<std::io::BufReader<std::fs::File>>;
-type FileLoopedDecoder = rodio::decoder::LoopedDecoder<std::io::BufReader<std::fs::File>>;
+type FileDecoder = rodio::Decoder<osiris_vfs::Reader>;
+type FileLoopedDecoder = rodio::decoder::LoopedDecoder<osiris_vfs::Reader>;
 
+/// Opens `path` through the virtual file system, so the same code reads the game's data from
+/// disk on desktop and from the page's in-memory store in the browser.
 fn open_source(path: &Path) -> Result<FileDecoder> {
-    let file = std::fs::File::open(path).map_err(|source| Error::Io {
+    let len = byte_len(path)?;
+    let reader = osiris_vfs::open(path).map_err(|source| Error::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    rodio::Decoder::try_from(file).map_err(|source| Error::Decode {
+    rodio::Decoder::builder()
+        .with_data(reader)
+        .with_byte_len(len)
+        .with_seekable(true)
+        .build()
+        .map_err(|source| Error::Decode {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+fn open_looped_source(path: &Path) -> Result<FileLoopedDecoder> {
+    let reader = osiris_vfs::open(path).map_err(|source| Error::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    rodio::Decoder::new_looped(reader).map_err(|source| Error::Decode {
         path: path.to_path_buf(),
         source,
     })
 }
 
-fn open_looped_source(path: &Path) -> Result<FileLoopedDecoder> {
-    let file = std::fs::File::open(path).map_err(|source| Error::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let reader = std::io::BufReader::new(file);
-    rodio::Decoder::new_looped(reader).map_err(|source| Error::Decode {
+/// The length of `path` in bytes, which the decoder needs to seek and to work out durations.
+fn byte_len(path: &Path) -> Result<u64> {
+    osiris_vfs::len(path).map_err(|source| Error::Io {
         path: path.to_path_buf(),
         source,
     })

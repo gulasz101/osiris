@@ -1387,23 +1387,30 @@ impl ApplicationHandler for App {
         {
             // Take the pending result out of the RefCell first so the borrow
             // ends before we touch other fields of `self`.
-            let got = self.pending.borrow_mut().take();
-            if got.is_some() && self.gfx.is_none() {
-                let result = got.unwrap();
-                match result {
-                    Ok((images, gfx)) => {
-                        self.images = Some(images);
-                        self.gfx = Some(gfx);
-                        self.finish_start(event_loop);
-                    }
-                    Err(e) => {
-                        log::error!("{e:#}");
-                        self.status = Some((format!("Graphics failed: {e}"), 10.0));
+            if self.gfx.is_none() {
+                // The browser starts graphics asynchronously, so until that
+                // result arrives there is nothing to draw with and every event
+                // waits for it here. Once `gfx` is set the events below (and so
+                // `RedrawRequested`) have to run, or nothing is ever drawn.
+                let result = self.pending.borrow_mut().take();
+                if let Some(result) = result {
+                    match result {
+                        Ok((images, gfx)) => {
+                            self.images = Some(images);
+                            self.gfx = Some(gfx);
+                            self.finish_start(event_loop);
+                            // On the web `RedrawRequested` only arrives after a
+                            // request, and nothing asks for the first frame yet.
+                            if let Some(gfx) = &self.gfx {
+                                gfx.window.request_redraw();
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("{e:#}");
+                            self.status = Some((format!("Graphics failed: {e}"), 10.0));
+                        }
                     }
                 }
-                return;
-            } else {
-                // Still waiting for graphics; nothing to do this frame.
                 return;
             }
         }

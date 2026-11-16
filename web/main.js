@@ -6,6 +6,7 @@ import init, {
     mount_user_file,
     start_game,
 } from "./pkg/osiris.js";
+import { filesFromInput } from "./folder.js";
 
 const folderInput = document.getElementById("folder");
 const startDiv = document.getElementById("start");
@@ -38,16 +39,15 @@ try {
     console.warn("osiris web: persistence unavailable", err);
 }
 
-folderInput.addEventListener("change", async () => {
-    const files = [...folderInput.files];
-    if (files.length === 0) return;
+async function loadFolder(list) {
+    console.log("osiris web: loading " + list.length + " files");
 
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const buf = await file.arrayBuffer();
-        mount_file(file.webkitRelativePath, new Uint8Array(buf));
-        if (i % 50 === 0 || i === files.length - 1) {
-            status.textContent = "Reading " + (i + 1) + " of " + files.length + " files...";
+    for (let i = 0; i < list.length; i++) {
+        const entry = list[i];
+        const buf = await entry.file.arrayBuffer();
+        mount_file("/" + entry.path, new Uint8Array(buf));
+        if (i % 50 === 0 || i === list.length - 1) {
+            status.textContent = "Reading " + (i + 1) + " of " + list.length + " files...";
         }
     }
 
@@ -67,4 +67,10 @@ folderInput.addEventListener("change", async () => {
         startDiv.style.display = "flex";
         status.textContent = "Error: " + err.message;
     }
+}
+
+folderInput.addEventListener("change", async () => {
+    const files = [...folderInput.files];
+    if (files.length === 0) return;
+    await loadFolder(filesFromInput(folderInput.files));
 });

@@ -91,6 +91,13 @@ Builds for macOS (Apple Silicon), Windows and Linux are linked under
 On macOS, right-click `Osiris.app` and choose Open the first time. On Windows,
 SmartScreen warns about an unrecognised app: click More info, then Run anyway.
 
+## Play in the browser
+
+The game also runs at [https://gulasz101.github.io/osiris/](https://gulasz101.github.io/osiris/): you
+choose your own Pharaoh + Cleopatra folder there and it plays in the page, and the files stay on
+your computer (nothing is uploaded). To run the same page from a checkout, run
+`scripts/pages-site.sh` and serve `out/site` with any static file server.
+
 ## Building
 
 With a recent stable Rust toolchain:

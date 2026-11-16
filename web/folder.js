@@ -40,10 +40,26 @@ export async function filesFromDrop(dataTransfer) {
         return [...dataTransfer.files].map(f => ({ path: f.name, file: f }));
     }
 
-    // If exactly one entry and it is a directory, walk it with no prefix
-    // (the dropped folder itself is the root).
+    // If exactly one entry and it is a directory, read its children directly
+    // so the folder name itself does not appear in paths (same as file input).
     if (entries.length === 1 && entries[0].isDirectory) {
-        return walk(entries[0], "");
+        const dir = /** @type {FileSystemDirectoryEntry} */ (entries[0]);
+        const reader = dir.createReader();
+        let allEntries = [];
+        while (true) {
+            const batch = await new Promise((resolve, reject) => {
+                reader.readEntries(resolve, reject);
+            });
+            if (batch.length === 0) break;
+            allEntries = allEntries.concat(batch);
+        }
+        // Walk each child with no prefix so the folder name is not in path.
+        const result = [];
+        for (const child of allEntries) {
+            const sub = await walk(child, "");
+            result.push(...sub);
+        }
+        return result;
     }
 
     // Otherwise walk every top-level entry.

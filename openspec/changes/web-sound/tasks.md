@@ -8,4 +8,4 @@
 - [x] 1.6 `web/audio.js` and its `<script>` tag before `main.js` in `web/index.html`. Check: `scripts/build-web.sh` succeeds and `scripts/web-smoke.sh` still reaches `osiris web: ready` with no console error.
 - [x] 1.7 Smoke test click, open, beep, state `running` (design.md). Check: `scripts/web-smoke.sh` prints `osiris web: sound OK` (or `SKIP: no audio device`) and exits 0.
 - [x] 1.8 `cargo test --workspace` passes on desktop and `scripts/check.sh` ends with `CHECK OK`.
-- [ ] 1.9 Real game sound (last task, needs the Pharaoh files): with `OSIRIS_DATA` set to the game folder, `scripts/web-smoke.sh` loads it and the console shows no `osiris-audio: could not play` line while the main menu is up. If no game data on the host, leave the box open and set the issue blocked.
+- [x] 1.9 Real game sound (last task, needs the Pharaoh files): with `OSIRIS_DATA` set to the game folder, `scripts/web-smoke.sh` loads it and the console shows no `osiris-audio: could not play` line while the main menu is up. If no game data on the host, leave the box open and set the issue blocked.

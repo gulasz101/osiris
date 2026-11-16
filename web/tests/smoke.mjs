@@ -394,6 +394,23 @@ async function run() {
                 console.error("FAIL: never saw 'osiris web: main menu'");
                 process.exitCode = 1;
             } else {
+                // Real game sound (web-sound task 1.9): the game's own audio must be running
+                // and no track or effect may have failed to open.
+                const audioState = await page.evaluate(() =>
+                    globalThis.osirisAudio ? globalThis.osirisAudio.state() : "missing"
+                );
+                const playErrors = consoleMessages.filter((m) => m.includes("could not play"));
+                for (const m of playErrors) console.error(m);
+                if (playErrors.length > 0) {
+                    console.error("FAIL: the game could not play " + playErrors.length + " sound file(s)");
+                    process.exitCode = 1;
+                } else if (audioState !== "running") {
+                    console.error("FAIL: no running AudioContext at the main menu (" + audioState + ")");
+                    process.exitCode = 1;
+                } else {
+                    console.log("osiris web: game sound OK (" + audioState + ")");
+                }
+
                 // Give WebGL a moment to present the frame before capturing.
                 await new Promise((r) => setTimeout(r, 500));
 

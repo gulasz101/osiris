@@ -1,7 +1,7 @@
 # web-drop Specification
 
 ## Purpose
-TBD - created by archiving change web-drop. Update Purpose after archive.
+Let the player start the game by dragging the Pharaoh folder from the file manager onto the page, instead of finding it in a file dialog. The dropped folder is read in the browser and mounted under the same paths as the folder button, so the game sees no difference.
 
 ## Requirements
 

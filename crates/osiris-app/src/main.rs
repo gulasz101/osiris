@@ -6,6 +6,11 @@
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+// Only the browser's smoke test plays the beep, but the generator and its test are plain code,
+// so they build (and are tested) on desktop as well.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod beep;
+
 mod advisors;
 mod anims;
 mod popup;

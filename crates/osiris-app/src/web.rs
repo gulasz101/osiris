@@ -1,7 +1,53 @@
 //! Browser entry point for Osiris on wasm32.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use wasm_bindgen::prelude::*;
+
+// ── Debug audio for the smoke test ──────────────────────────────────
+
+thread_local! {
+    /// The audio the smoke test opened, kept here so it lives as long as the page does.
+    /// The game opens its own when it starts; this is only for the test.
+    static DEBUG_AUDIO: RefCell<Option<osiris_audio::Audio>> = const { RefCell::new(None) };
+}
+
+/// Open the default audio output device and keep it (browser, smoke test only).
+///
+/// Returns `true` when a device opened: on a browser without an audio output this is
+/// `false`, and playback stays silent, exactly as the game's own `Audio::new` does.
+#[wasm_bindgen]
+pub fn debug_audio_open() -> bool {
+    match osiris_audio::Audio::new(std::path::Path::new("/PharaohData")) {
+        Ok(audio) => {
+            let has_output = audio.has_output();
+            log::info!("osiris web: debug_audio_open - has_output {has_output}");
+            DEBUG_AUDIO.with(|cell| *cell.borrow_mut() = Some(audio));
+            has_output
+        }
+        Err(err) => {
+            log::warn!("osiris web: debug_audio_open failed: {err}");
+            false
+        }
+    }
+}
+
+/// Play a generated beep from the in-memory store (browser, smoke test only).
+///
+/// The WAV is built in [`crate::beep`], so no game file is needed to hear whether the
+/// browser build has sound.
+#[wasm_bindgen]
+pub fn debug_audio_beep() {
+    const PATH: &str = "/PharaohData/AUDIO/Wavs/osiris_beep.wav";
+    if let Err(err) = osiris_vfs::write(PATH, crate::beep::beep_wav()) {
+        log::warn!("osiris web: debug_audio_beep - could not write {PATH}: {err}");
+        return;
+    }
+    DEBUG_AUDIO.with(|cell| match cell.borrow().as_ref() {
+        Some(audio) => audio.play_effect("osiris_beep.wav"),
+        None => log::warn!("osiris web: debug_audio_beep - no audio opened, call debug_audio_open"),
+    });
+}
 
 // ── IndexedDB store bindings (browser only) ────────────────────────
 

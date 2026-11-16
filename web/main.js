@@ -6,7 +6,9 @@ import init, {
     mount_user_file,
     start_game,
 } from "./pkg/osiris.js";
-import { filesFromInput } from "./folder.js";
+import { filesFromDrop, filesFromInput } from "./folder.js";
+
+let busy = false;
 
 const folderInput = document.getElementById("folder");
 const startDiv = document.getElementById("start");
@@ -68,6 +70,28 @@ async function loadFolder(list) {
         status.textContent = "Error: " + err.message;
     }
 }
+
+// Drag-and-drop handlers on the start div.
+startDiv.addEventListener("dragover", e => {
+    e.preventDefault();
+    startDiv.classList.add("drag");
+});
+
+startDiv.addEventListener("dragleave", () => {
+    startDiv.classList.remove("drag");
+});
+
+startDiv.addEventListener("drop", async e => {
+    e.preventDefault();
+    startDiv.classList.remove("drag");
+    if (busy) return;
+    busy = true;
+    try {
+        await loadFolder(await filesFromDrop(e.dataTransfer));
+    } finally {
+        busy = false;
+    }
+});
 
 folderInput.addEventListener("change", async () => {
     const files = [...folderInput.files];

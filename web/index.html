@@ -14,6 +14,7 @@
         h1 { font-size: 1.8rem; }
         p { max-width: 40ch; opacity: 0.85; }
         #status { margin-top: 1em; color: #ffd700; min-height: 1.5em; }
+        #start.drag { outline: 3px dashed #ffd700; }
     </style>
 </head>
 <body>
@@ -22,6 +23,7 @@
         <h1>Osiris: Pharaoh in your browser</h1>
         <p>Choose the folder where Pharaoh is installed. The files stay on your computer; nothing is uploaded.</p>
         <input type="file" id="folder" webkitdirectory multiple />
+        <p>or drag the Pharaoh folder here</p>
         <p id="status"></p>
     </div>
     <script src="store.js"></script>

@@ -121,6 +121,32 @@ async function run() {
             return;
         }
 
+        // ── Sound: gesture, open a device, play a beep (web-sound task 1.7) ──
+        // Chromium only starts an AudioContext after a real user gesture, so click the page
+        // first, then open the game's output device and play the generated beep from the store.
+        await page.mouse.click(20, 20);
+        const sound = await page.evaluate(async () => {
+            const wasm = await import("/pkg/osiris.js");
+            const opened = wasm.debug_audio_open();
+            if (opened) {
+                wasm.debug_audio_beep();
+                await new Promise((resolve) => setTimeout(resolve, 300));
+            }
+            return {
+                opened,
+                state: globalThis.osirisAudio ? globalThis.osirisAudio.state() : "missing",
+            };
+        });
+
+        if (!sound.opened) {
+            console.log("SKIP: no audio device");
+        } else if (sound.state !== "running") {
+            console.error("FAIL: no sound (" + JSON.stringify(sound) + ")");
+            process.exitCode = 1;
+        } else if (process.exitCode !== 1) {
+            console.log("osiris web: sound OK");
+        }
+
         // ── Persistence smoke test (write, reload, read) ────────────
         await page.evaluate(async () => {
             debug_write_user("smoke.txt", "kept");

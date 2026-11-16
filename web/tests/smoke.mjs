@@ -75,7 +75,12 @@ async function run() {
     await new Promise((resolve) => server.listen(PORT, resolve));
 
     try {
-        browser = await chromium.launch();
+        // --use-angle=gl forces ANGLE to use OpenGL (WebGL2) so headless Chrome
+        // actually renders WebGL content. Without it, the canvas is blank.
+        // --no-sandbox is needed when running as root in CI containers.
+        browser = await chromium.launch({
+            args: ["--use-angle=gl", "--no-sandbox"],
+        });
         page = await browser.newPage();
 
         page.on("console", (msg) => {
@@ -245,9 +250,19 @@ async function run() {
                             const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
                             let info = `#${canvas.id}: ${canvas.width}x${canvas.height} style=${canvas.style.width}x${canvas.style.height}`;
                             if (gl) {
-                                const pixels = new Uint8Array(4);
-                                gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-                                info += ` pixel=[${pixels.join(',')}]`;
+                                // Sample a grid of pixels to count distinct colors.
+                                const w = canvas.width || 1280;
+                                const h = canvas.height || 768;
+                                const step = Math.max(1, Math.floor(Math.min(w, h) / 32));
+                                const seen = new Set();
+                                for (let y = 0; y < h; y += step) {
+                                    for (let x = 0; x < w; x += step) {
+                                        const pixels = new Uint8Array(4);
+                                        gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                                        seen.add(pixels[0] << 24 | pixels[1] << 16 | pixels[2] << 8 | pixels[3]);
+                                    }
+                                }
+                                info += ` distinct=${seen.size}`;
                             }
                             parts.push(info);
                         } catch(e) {
@@ -257,6 +272,18 @@ async function run() {
                     return parts.join('; ');
                 });
                 console.log("osiris web: canvas debug - " + pixelInfo);
+
+                // Fail if the canvas is blank (too few distinct colors).
+                const match = pixelInfo.match(/distinct=(\d+)/);
+                if (match) {
+                    const distinct = parseInt(match[1], 10);
+                    if (distinct < 5) {
+                        console.error("FAIL: canvas has only " + distinct + " distinct color(s), likely blank");
+                        process.exitCode = 1;
+                    } else {
+                        console.log("osiris web: canvas OK (" + distinct + " distinct colors)");
+                    }
+                }
 
                 // Take a screenshot.
                 await page.screenshot({ path: "/tmp/osiris-web-menu.png", fullPage: false });

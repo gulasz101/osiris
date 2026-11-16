@@ -150,6 +150,27 @@ pub struct Gfx {
 
 impl Gfx {
     pub async fn new(window: Window, library: ImageLibrary) -> Result<Self> {
+        // In the browser the window's own `inner_size` is only filled in by
+        // winit's resize observer, which has not run yet when graphics start:
+        // it reads 0, the surface would be configured 1x1 and nothing would be
+        // drawn. Take the size from the canvas instead, in the same device
+        // pixels winit's later resize events use.
+        #[cfg(target_arch = "wasm32")]
+        let size = {
+            use winit::platform::web::WindowExtWebSys;
+            let scale = window.scale_factor();
+            window.canvas().map_or_else(
+                || window.inner_size(),
+                |canvas| {
+                    winit::dpi::PhysicalSize::new(
+                        (canvas.client_width() as f64 * scale).round().max(1.0) as u32,
+                        (canvas.client_height() as f64 * scale).round().max(1.0) as u32,
+                    )
+                },
+            )
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let size = window.inner_size();
         let window = Arc::new(window);
         #[cfg(target_arch = "wasm32")]
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -161,7 +182,6 @@ impl Gfx {
         let surface = instance.create_surface(window.clone())?;
         let adapter = adapter(&instance, Some(&surface)).await?;
         let (device, queue) = device(&adapter).await?;
-        let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .context("surface unsupported")?;

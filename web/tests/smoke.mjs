@@ -163,6 +163,136 @@ async function run() {
             }
         }
 
+        // ── Folder walker (fake entries, no game data needed) ─────────
+        // Drop one fake folder "Pharaoh" containing 150 files at the root and
+        // a subfolder Data with a.sg3. The reader hands out the entries in
+        // batches of 100, then 50, then [] — Chromium caps a batch at 100, so a
+        // single readEntries call would lose files.
+        const walkResult = await page.evaluate(async () => {
+            const { filesFromDrop, filesFromInput } = await import("/folder.js");
+
+            const fileEntry = (name) => ({
+                isFile: true,
+                isDirectory: false,
+                name,
+                file(ok) { ok(new File([new Uint8Array([1])], name)); },
+            });
+
+            const dirEntry = (name, batches) => {
+                const pending = batches.slice();
+                return {
+                    isFile: false,
+                    isDirectory: true,
+                    name,
+                    createReader() {
+                        return {
+                            readEntries(ok) {
+                                ok(pending.length ? pending.shift() : []);
+                            },
+                        };
+                    },
+                };
+            };
+
+            const first = [];
+            for (let i = 0; i < 100; i++) first.push(fileEntry("f" + i + ".sg3"));
+            const second = [];
+            for (let i = 100; i < 150; i++) second.push(fileEntry("f" + i + ".sg3"));
+            second.push(dirEntry("Data", [[fileEntry("a.sg3")]]));
+            const pharaoh = dirEntry("Pharaoh", [first, second, []]);
+
+            const dropped = await filesFromDrop({
+                items: [{ webkitGetAsEntry: () => pharaoh }],
+                files: [],
+            });
+
+            // The same folder by file input must give the same relative path.
+            const inputFile = new File([new Uint8Array([1])], "a.sg3");
+            Object.defineProperty(inputFile, "webkitRelativePath", {
+                value: "Pharaoh/Data/a.sg3",
+            });
+            const fromInput = filesFromInput([inputFile]);
+
+            return {
+                count: dropped.length,
+                dropPath: dropped.find((e) => e.path.endsWith("Data/a.sg3"))?.path ?? null,
+                inputPath: fromInput[0]?.path ?? null,
+                prefixed: dropped.filter((e) => e.path.startsWith("Pharaoh/")).length,
+            };
+        });
+
+        if (
+            walkResult.count !== 151 ||
+            walkResult.dropPath !== "Data/a.sg3" ||
+            walkResult.inputPath !== "Data/a.sg3" ||
+            walkResult.prefixed !== 0
+        ) {
+            console.error("FAIL: folder walk " + JSON.stringify(walkResult));
+            process.exitCode = 1;
+        } else if (process.exitCode !== 1) {
+            // ── Synthetic drop on #start ──────────────────────────────
+            // Synthetic DataTransfer items have no file system entries, so this
+            // exercises the fallback to dataTransfer.files and loadFolder.
+            const messageMark = consoleMessages.length;
+            await page.evaluate(() => {
+                const start = document.getElementById("start");
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(new File(["x"], "x.txt", { type: "text/plain" }));
+                start.dispatchEvent(new DragEvent("drop", {
+                    dataTransfer,
+                    bubbles: true,
+                    cancelable: true,
+                }));
+            });
+
+            let sawLoading = false;
+            const dropDeadline = Date.now() + 15_000;
+            while (Date.now() < dropDeadline) {
+                await new Promise((r) => setTimeout(r, 100));
+                if (consoleMessages.slice(messageMark).some((m) => m.includes("osiris web: loading 1 files"))) {
+                    sawLoading = true;
+                    break;
+                }
+            }
+
+            // A lone x.txt is not a Pharaoh folder, so start_game must fail and
+            // put #start back on screen. start_game throws a JsValue string, so
+            // the readable message is the console error, not err.message.
+            let dropState = { visible: false, status: "" };
+            const stateDeadline = Date.now() + 15_000;
+            while (Date.now() < stateDeadline) {
+                dropState = await page.evaluate(() => {
+                    const start = document.getElementById("start");
+                    return {
+                        visible: !!start && getComputedStyle(start).display !== "none",
+                        status: document.getElementById("status")?.textContent ?? "",
+                    };
+                });
+                const failed = consoleMessages.slice(messageMark).some((m) =>
+                    m.includes("does not hold Pharaoh")
+                );
+                if (dropState.visible && failed) break;
+                await new Promise((r) => setTimeout(r, 100));
+            }
+
+            const sawFailure = consoleMessages.slice(messageMark).some((m) =>
+                m.includes("does not hold Pharaoh")
+            );
+
+            for (const m of consoleMessages.slice(messageMark)) {
+                console.log(m);
+            }
+
+            if (!sawLoading || !sawFailure || !dropState.visible) {
+                console.error(
+                    "FAIL: folder drop " + JSON.stringify({ sawLoading, sawFailure, ...dropState })
+                );
+                process.exitCode = 1;
+            } else {
+                console.log("osiris web: drop OK");
+            }
+        }
+
         // ── Game data smoke test (when OSIRIS_DATA is set) ────────────
         const osirisData = process.env.OSIRIS_DATA;
         if (osirisData && fs.existsSync(osirisData)) {

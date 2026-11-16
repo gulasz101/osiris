@@ -409,6 +409,63 @@ fn find_ignoring_case(root: &Path, sub: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    /// A mono 16-bit PCM WAV of `samples` silent samples, at 8000 Hz.
+    fn wav_bytes(samples: usize) -> Vec<u8> {
+        const RATE: u32 = 8000;
+        let data_len = (samples * 2) as u32;
+        let mut bytes = Vec::with_capacity(44 + data_len as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+        bytes.extend_from_slice(&RATE.to_le_bytes());
+        bytes.extend_from_slice(&(RATE * 2).to_le_bytes()); // bytes per second
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // bytes per frame
+        bytes.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        bytes.resize(44 + data_len as usize, 0);
+        bytes
+    }
+
+    /// A directory of its own for a test, removed afterwards.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("osiris-audio-{name}-{}", std::process::id()));
+        let _ = osiris_vfs::remove_dir_all(&dir);
+        osiris_vfs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Sound files are read through `osiris_vfs`, so the browser's store decodes as disks do.
+    #[test]
+    fn open_source_decodes_a_wav_from_the_store() {
+        let dir = scratch_dir("open-source");
+        let path = dir.join("beep.wav");
+        osiris_vfs::write(&path, wav_bytes(800)).unwrap();
+
+        let samples = open_source(&path).unwrap().count();
+        assert!(samples > 0, "decoded no samples");
+        assert_eq!(samples, 800);
+
+        osiris_vfs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn open_source_reports_a_missing_file_as_io() {
+        let dir = scratch_dir("missing");
+        let path = dir.join("nothere.wav");
+
+        match open_source(&path) {
+            Err(Error::Io { path: reported, .. }) => assert_eq!(reported, path),
+            Err(other) => panic!("expected Error::Io, got {other:?}"),
+            Ok(_) => panic!("expected Error::Io, got a decoder"),
+        }
+
+        osiris_vfs::remove_dir_all(&dir).unwrap();
+    }
+
     /// The shipped data spells names in either case; the original's tables find them.
     #[test]
     fn tables_find_the_data_whatever_the_case() {
@@ -422,6 +479,23 @@ mod tests {
         assert!(find_ignoring_case(&audio, Path::new("Ambient/housing1.mp3")).is_some());
         assert!(find_ignoring_case(&audio, Path::new("Voice/Walker/doctor_g01.wav")).is_some());
         assert!(find_ignoring_case(&audio, Path::new("Wavs/plaza1.wav")).is_none());
+    }
+
+    /// The same lookup against a directory made in the test: no game file is involved.
+    #[test]
+    fn find_ignoring_case_walks_a_temp_directory() {
+        let dir = scratch_dir("case");
+        osiris_vfs::create_dir_all(&dir.join("Wavs")).unwrap();
+        osiris_vfs::write(&dir.join("Wavs/WELL.WAV"), wav_bytes(1)).unwrap();
+
+        // On a case-insensitive disk the exact name already resolves, which is fine: either way
+        // the lookup ends at the file that is really there.
+        let found = find_ignoring_case(&dir, Path::new("Wavs/well.wav")).expect("lookup found no file");
+        assert!(osiris_vfs::is_file(&found), "{found:?} is not the file");
+        assert_eq!(found.file_name().unwrap().to_string_lossy().to_ascii_uppercase(), "WELL.WAV");
+        assert_eq!(find_ignoring_case(&dir, Path::new("Wavs/plaza1.wav")), None);
+
+        osiris_vfs::remove_dir_all(&dir).unwrap();
     }
 }
 

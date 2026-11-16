@@ -1,7 +1,7 @@
 # web-persist Specification
 
 ## Purpose
-TBD - created by archiving change web-persist. Update Purpose after archive.
+Keep the player's own files after a page reload: everything the game writes under `/user` is stored in the browser's IndexedDB and is back in the in-memory store the next time the page loads.
 
 ## Requirements
 

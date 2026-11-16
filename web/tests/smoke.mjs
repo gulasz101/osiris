@@ -116,6 +116,48 @@ async function run() {
             return;
         }
 
+        // ── Persistence smoke test (write, reload, read) ────────────
+        await page.evaluate(async () => {
+            debug_write_user("smoke.txt", "kept");
+            await osirisStore.idle();
+        });
+
+        // Reload the page — same browser context keeps IndexedDB alive.
+        consoleMessages.length = 0;
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+
+        // Wait for the restored message (up to 15 s).
+        const restoreDeadline = Date.now() + 15_000;
+        let foundRestore = false;
+        while (Date.now() < restoreDeadline) {
+            await new Promise((r) => setTimeout(r, 200));
+            for (const m of consoleMessages) {
+                if (m.includes("osiris web: restored")) {
+                    foundRestore = true;
+                }
+            }
+            if (foundRestore) break;
+        }
+
+        // Print any new messages from the reload.
+        for (const m of consoleMessages) {
+            console.log(m);
+        }
+
+        if (!foundRestore) {
+            console.error("FAIL: never saw 'osiris web: restored'");
+            process.exitCode = 1;
+        } else {
+            // Read back the file — must be "kept".
+            const value = await page.evaluate(() => debug_read_user("smoke.txt"));
+            if (value !== "kept") {
+                console.error("FAIL: user file not kept (got '" + value + "')");
+                process.exitCode = 1;
+            } else {
+                console.log("osiris web: persist OK");
+            }
+        }
+
         // ── Game data smoke test (when OSIRIS_DATA is set) ────────────
         const osirisData = process.env.OSIRIS_DATA;
         if (osirisData && fs.existsSync(osirisData)) {
@@ -155,6 +197,17 @@ async function run() {
 
             console.log("osiris web: all essential game files mounted, starting game...");
 
+            // Set canvas dimensions before starting the game (winit reads client_width/height).
+            await page.evaluate(() => {
+                const canvas = document.getElementById('osiris');
+                if (canvas) {
+                    canvas.width = 1280;
+                    canvas.height = 768;
+                    canvas.style.width = "1280px";
+                    canvas.style.height = "768px";
+                }
+            });
+
             // Start the game — returns a Promise on wasm.
             await page.evaluate(() => start_game());
 
@@ -180,6 +233,31 @@ async function run() {
                 console.error("FAIL: never saw 'osiris web: main menu'");
                 process.exitCode = 1;
             } else {
+                // Give WebGL a moment to present the frame before capturing.
+                await new Promise((r) => setTimeout(r, 500));
+
+                // Read canvas pixels directly to verify rendering happened.
+                const pixelInfo = await page.evaluate(() => {
+                    const allCanvases = document.querySelectorAll('canvas');
+                    let parts = [`canvases=${allCanvases.length}`];
+                    for (const canvas of allCanvases) {
+                        try {
+                            const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                            let info = `#${canvas.id}: ${canvas.width}x${canvas.height} style=${canvas.style.width}x${canvas.style.height}`;
+                            if (gl) {
+                                const pixels = new Uint8Array(4);
+                                gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                                info += ` pixel=[${pixels.join(',')}]`;
+                            }
+                            parts.push(info);
+                        } catch(e) {
+                            parts.push(`#${canvas.id}: err=${e.message}`);
+                        }
+                    }
+                    return parts.join('; ');
+                });
+                console.log("osiris web: canvas debug - " + pixelInfo);
+
                 // Take a screenshot.
                 await page.screenshot({ path: "/tmp/osiris-web-menu.png", fullPage: false });
                 console.log("osiris web: screenshot written to /tmp/osiris-web-menu.png");

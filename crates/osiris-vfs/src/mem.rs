@@ -318,6 +318,9 @@ impl MemFs {
             if **dir == prefix {
                 continue; // skip the directory itself
             }
+            if !dir.starts_with(&prefix) {
+                continue; // not under this prefix
+            }
             let after_prefix = &dir[prefix.len()..];
             if !after_prefix.starts_with('/') {
                 continue;

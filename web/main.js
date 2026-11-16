@@ -54,6 +54,12 @@ folderInput.addEventListener("change", async () => {
     try {
         startDiv.style.display = "none";
         canvas.hidden = false;
+        // Set explicit dimensions so winit's canvas window is not 1×1.
+        canvas.width = 1280;
+        canvas.height = 768;
+        canvas.style.width = "1280px";
+        canvas.style.height = "768px";
+        console.log("osiris web: set canvas to " + canvas.width + "x" + canvas.height);
         status.textContent = "Starting game...";
         start_game();
     } catch (err) {

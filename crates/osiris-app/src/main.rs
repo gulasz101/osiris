@@ -1316,8 +1316,16 @@ impl ApplicationHandler for App {
                         .dyn_into::<web_sys::HtmlCanvasElement>()
                         .unwrap()
                 });
-            // Un-hide the canvas.
+            // Un-hide the canvas and set explicit intrinsic dimensions.
             let _ = canvas.style().set_property("display", "block");
+            if canvas.width() < 2 {
+                let (w, h) = (
+                    self.args.size.0.max(MIN_WINDOW.0),
+                    self.args.size.1.max(MIN_WINDOW.1),
+                );
+                canvas.set_width(w);
+                canvas.set_height(h);
+            }
 
             let (width, height) = (
                 canvas.client_width() as u32,

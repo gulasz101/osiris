@@ -151,6 +151,12 @@ pub struct Gfx {
 impl Gfx {
     pub async fn new(window: Window, library: ImageLibrary) -> Result<Self> {
         let window = Arc::new(window);
+        #[cfg(target_arch = "wasm32")]
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::GL,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        #[cfg(not(target_arch = "wasm32"))]
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone())?;
         let adapter = adapter(&instance, Some(&surface)).await?;

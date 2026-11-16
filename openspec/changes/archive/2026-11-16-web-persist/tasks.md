@@ -6,4 +6,4 @@
 - [x] 1.4 `web/store.js` and its `<script>` tag before `main.js` in `index.html`. Check: `scripts/build-web.sh` succeeds and the console shows no `osirisStore` error in `scripts/web-smoke.sh`.
 - [x] 1.5 `main.js` restores stored files before the folder button. Check: `scripts/web-smoke.sh` prints `osiris web: restored 0 user files` on a fresh browser.
 - [x] 1.6 Smoke test write, reload, read (design.md). Check: `scripts/web-smoke.sh` prints `osiris web: persist OK` and exits 0.
-- [ ] 1.7 `scripts/check.sh` ends with `CHECK OK`.
+- [x] 1.7 `scripts/check.sh` ends with `CHECK OK`.

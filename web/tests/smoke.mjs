@@ -3,14 +3,53 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
-const WEB_DIR = path.resolve(import.meta.dirname, "..");
+const WEB_DIR = path.resolve(process.env.SMOKE_ROOT ?? path.resolve(import.meta.dirname, ".."));
+// URL prefix the site is served under. GitHub Pages serves us at /osiris/, so the
+// smoke test can prove the page works there without a local GitHub Pages.
+const BASE = process.env.SMOKE_BASE ?? "/";
+if (!BASE.startsWith("/") || !BASE.endsWith("/")) {
+    console.error("FAIL: SMOKE_BASE must start and end with '/' (got " + BASE + ")");
+    process.exit(1);
+}
 const PORT = 8765;
 
-/** Serve static files from WEB_DIR. */
+// Every request the page made, so a missing file shows up instead of hiding
+// behind a blank page.
+/** @type {string[]} */
+const requestLog = [];
+
+/** Serve static files from WEB_DIR, under BASE. */
 function createHandler() {
     return (req, res) => {
-        let url = new URL(req.url, `http://localhost:${PORT}`);
-        let filePath = path.join(WEB_DIR, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+        const url = new URL(req.url, `http://localhost:${PORT}`);
+
+        // A request outside BASE is a 404, exactly as GitHub Pages would answer.
+        if (!url.pathname.startsWith(BASE)) {
+            requestLog.push(`404 ${url.pathname} (outside ${BASE})`);
+            res.writeHead(404);
+            res.end("Not found");
+            return;
+        }
+
+        let rel = decodeURIComponent(url.pathname.slice(BASE.length));
+        if (rel === "" || rel.endsWith("/")) rel = path.join(rel, "index.html");
+        const filePath = path.join(WEB_DIR, rel);
+
+        // Refuse anything that climbs out of WEB_DIR.
+        const inside = path.relative(WEB_DIR, filePath);
+        if (inside.startsWith("..") || path.isAbsolute(inside)) {
+            requestLog.push(`404 ${url.pathname} (leaves the served folder)`);
+            res.writeHead(404);
+            res.end("Not found");
+            return;
+        }
+
+        // The page names no favicon; answer quietly so the log stays readable.
+        if (path.basename(filePath) === "favicon.ico") {
+            res.writeHead(204);
+            res.end();
+            return;
+        }
 
         const ext = path.extname(filePath).toLowerCase();
         const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".css": "text/css", ".json": "application/json" };
@@ -18,9 +57,11 @@ function createHandler() {
 
         try {
             const data = fs.readFileSync(filePath);
+            requestLog.push(`200 ${url.pathname}`);
             res.writeHead(200);
             res.end(data);
         } catch {
+            requestLog.push(`404 ${url.pathname}`);
             res.writeHead(404);
             res.end("Not found");
         }
@@ -74,6 +115,47 @@ function stageFiles(osirisData, relPaths) {
 async function run() {
     await new Promise((resolve) => server.listen(PORT, resolve));
 
+    /**
+     * Ask the server for `rawPath` exactly as written, with no URL cleaning on the
+     * way, so a `..` in the path really reaches the handler. Returns the status and
+     * the line the handler logged for it, so a 404 can be told apart from "the file
+     * happens not to exist".
+     */
+    function probe(rawPath) {
+        return new Promise((resolve) => {
+            const req = http.request({ host: "127.0.0.1", port: PORT, path: rawPath }, (res) => {
+                res.resume();
+                res.on("end", () => resolve({ status: res.statusCode, logged: requestLog.at(-1) ?? "" }));
+            });
+            req.on("error", () => resolve({ status: 0, logged: "" }));
+            req.end();
+        });
+    }
+
+    // GitHub Pages answers 404 for everything outside the site prefix and serves
+    // nothing above the site folder. `new URL` already collapses a plain `..`, so an
+    // encoded separator is what still reaches the handler with a `..` in it. These
+    // probes are deliberate, so wipe the log afterwards.
+    const problems = [];
+    const traversal = await probe(BASE + "..%2F..%2Fpackage.json");
+    if (!traversal.logged.includes("leaves the served folder")) {
+        problems.push("a ../ path was not refused (" + traversal.logged + ")");
+    }
+    if (BASE !== "/") {
+        const outside = await probe("/not-the-site/index.html");
+        if (!outside.logged.includes("outside ")) {
+            problems.push("a path outside " + BASE + " was not refused (" + outside.logged + ")");
+        }
+    }
+    requestLog.length = 0;
+
+    if (problems.length > 0) {
+        console.error("FAIL: " + problems.join("; "));
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: base OK (" + BASE + ")");
+
     try {
         // --use-angle=gl forces ANGLE to use OpenGL (WebGL2) so headless Chrome
         // actually renders WebGL content. Without it, the canvas is blank.
@@ -88,7 +170,7 @@ async function run() {
         });
 
         try {
-            await page.goto(`http://localhost:${PORT}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            await page.goto(`http://localhost:${PORT}${BASE}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
         } catch {
             // Timeout is fine; we poll console messages below.
         }
@@ -114,6 +196,9 @@ async function run() {
         for (const m of consoleMessages) {
             console.log(m);
         }
+        for (const r of requestLog) {
+            if (r.startsWith("404")) console.log("REQUEST " + r);
+        }
 
         if (!foundReady) {
             console.error("FAIL: never saw 'osiris web: ready'");
@@ -125,8 +210,8 @@ async function run() {
         // Chromium only starts an AudioContext after a real user gesture, so click the page
         // first, then open the game's output device and play the generated beep from the store.
         await page.mouse.click(20, 20);
-        const sound = await page.evaluate(async () => {
-            const wasm = await import("/pkg/osiris.js");
+        const sound = await page.evaluate(async (base) => {
+            const wasm = await import(base + "pkg/osiris.js");
             const opened = wasm.debug_audio_open();
             if (opened) {
                 wasm.debug_audio_beep();
@@ -136,8 +221,7 @@ async function run() {
                 opened,
                 state: globalThis.osirisAudio ? globalThis.osirisAudio.state() : "missing",
             };
-        });
-
+        }, BASE);
         if (!sound.opened) {
             console.log("SKIP: no audio device");
         } else if (sound.state !== "running") {
@@ -194,8 +278,8 @@ async function run() {
         // a subfolder Data with a.sg3. The reader hands out the entries in
         // batches of 100, then 50, then [] — Chromium caps a batch at 100, so a
         // single readEntries call would lose files.
-        const walkResult = await page.evaluate(async () => {
-            const { filesFromDrop, filesFromInput } = await import("/folder.js");
+        const walkResult = await page.evaluate(async (base) => {
+            const { filesFromDrop, filesFromInput } = await import(base + "folder.js");
 
             const fileEntry = (name) => ({
                 isFile: true,
@@ -245,7 +329,7 @@ async function run() {
                 inputPath: fromInput[0]?.path ?? null,
                 prefixed: dropped.filter((e) => e.path.startsWith("Pharaoh/")).length,
             };
-        });
+        }, BASE);
 
         if (
             walkResult.count !== 151 ||
@@ -320,8 +404,12 @@ async function run() {
         }
 
         // ── Game data smoke test (when OSIRIS_DATA is set) ────────────
+        // Staging copies game files into the served folder, so it only works when we
+        // serve web/ itself, never the published site.
         const osirisData = process.env.OSIRIS_DATA;
-        if (osirisData && fs.existsSync(osirisData)) {
+        if (process.env.SMOKE_ROOT && osirisData && fs.existsSync(osirisData)) {
+            console.log("SKIP: game data needs SMOKE_ROOT unset");
+        } else if (osirisData && fs.existsSync(osirisData)) {
             console.log("osiris web: loading game data from " + osirisData);
 
             /** @type {string[]} */
@@ -335,11 +423,11 @@ async function run() {
 
             // Mount all game files by fetching from the test server and using mount_file.
             // Use paths like "PharaohData/..." so mount_file creates /PharaohData/...
-            await page.evaluate(async (paths) => {
+            await page.evaluate(async ([paths, base]) => {
                 let count = 0;
                 for (const rel of paths) {
                     const vfsPath = "PharaohData/" + rel;
-                    const resp = await fetch("/game-data-staging/PharaohData/" + rel);
+                    const resp = await fetch(base + "game-data-staging/PharaohData/" + rel);
                     if (!resp.ok) {
                         console.error("Failed to fetch " + rel + ": " + resp.status);
                         continue;
@@ -351,7 +439,7 @@ async function run() {
                         console.log("osiris web: mounted " + count + "/" + paths.length + " files");
                     }
                 }
-            }, relPaths);
+            }, [relPaths, BASE]);
 
             // Clean up staging directory.
             fs.rmSync(stagingDir, { recursive: true });

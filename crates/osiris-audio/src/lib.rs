@@ -118,6 +118,12 @@ impl Audio {
         })
     }
 
+    /// Whether an audio output device was opened. A silent `Audio` (no device) returns `false`,
+    /// so the browser can say so instead of pretending to play.
+    pub fn has_output(&self) -> bool {
+        self.inner.is_some()
+    }
+
     /// Plays `track` as the current music, replacing whatever was playing.
     pub fn play_music(&self, track: &Track) {
         let Some(inner) = &self.inner else { return };
@@ -494,6 +500,21 @@ mod tests {
         assert!(osiris_vfs::is_file(&found), "{found:?} is not the file");
         assert_eq!(found.file_name().unwrap().to_string_lossy().to_ascii_uppercase(), "WELL.WAV");
         assert_eq!(find_ignoring_case(&dir, Path::new("Wavs/plaza1.wav")), None);
+
+        osiris_vfs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A machine with no sound device, or a directory with no game data in it, still starts:
+    /// every sound call then does nothing.
+    #[test]
+    fn audio_new_succeeds_without_game_data() {
+        let dir = scratch_dir("no-game-data");
+
+        let audio = Audio::new(&dir).expect("Audio::new failed");
+        // Either answer is fine here; what matters is that no failure came out.
+        let _has_output = audio.has_output();
+        audio.play_effect("BUTTON.WAV");
+        audio.update_music(0);
 
         osiris_vfs::remove_dir_all(&dir).unwrap();
     }

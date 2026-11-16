@@ -1,6 +1,6 @@
 # Tasks: web-pages
 
-- [ ] 1.1 `scripts/check-site.sh` (design.md: allowed list, game-file pattern, 50 MB cap). Check: on a temp folder holding `index.html` and `Data/test.sg3` it prints the `.sg3` line and `check-site: FAILED` and exits 1; on a temp folder holding only `index.html` and `.nojekyll` it prints `check-site: OK` and exits 0.
+- [x] 1.1 `scripts/check-site.sh` (design.md: allowed list, game-file pattern, 50 MB cap). Check: on a temp folder holding `index.html` and `Data/test.sg3` it prints the `.sg3` line and `check-site: FAILED` and exits 1; on a temp folder holding only `index.html` and `.nojekyll` it prints `check-site: OK` and exits 0.
 - [ ] 1.2 `scripts/pages-site.sh` (design.md). Check: `sh scripts/pages-site.sh` ends with `check-site: OK`, and `find out/site -type f | sort` prints exactly the 8 allowed files.
 - [ ] 1.3 `scripts/check.sh`: add the two `check-site.sh` runs from 1.1 as a self-test (temp folders under `mktemp -d`, removed after). Check: `scripts/check.sh` ends with `CHECK OK`.
 - [ ] 1.4 `web/tests/smoke.mjs`: `SMOKE_ROOT` and `SMOKE_BASE` (design.md), including the `..` guard and the 404 outside `BASE`. Check: `scripts/web-smoke.sh` still reaches `osiris web: ready` with neither var set, and `SMOKE_ROOT=$PWD/out/site SMOKE_BASE=/osiris/ node web/tests/smoke.mjs` (after 1.2, from the repo root) also reaches `osiris web: ready` with no console error and no 404 in the request log.

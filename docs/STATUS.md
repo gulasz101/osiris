@@ -6,6 +6,9 @@ written for the player, not for the developer. The desktop build does not change
 The page ships no game data. Not one file from Pharaoh or Cleopatra is in this repo or in the
 published site. The player chooses their own install on their own computer.
 
+The engine behind the page is the desktop Osiris, version 0.1.17. The fork is merged up to
+`joemalott/osiris` 0.1.17, so the browser build has the same game rules as the desktop build.
+
 ## 1. Run it
 
 You need a recent stable Rust toolchain, the `wasm32-unknown-unknown` target, and the

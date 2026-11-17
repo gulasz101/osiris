@@ -98,5 +98,11 @@ Filled in as the tasks are done; the machine is Wojtek's Mac, the data folder is
 | what | before | after |
 |---|---|---|
 | wasm size, `web/pkg/osiris_bg.wasm` | 13,739,637 bytes (release build) | see 1.7 |
-| reading the 1335 files, one at a time | 3,776 / 4,141 / 5,333 ms over three runs (the disk cache moves it) | see 1.5 |
-| picking the folder to the main menu | 4,256 ms | see 1.5 |
+| reading the 1335 files, one at a time | 3,776 / 4,141 / 5,333 ms over three runs (the disk cache moves it) | 2,552 / 2,940 ms with eight at a time |
+| picking the folder to the main menu | 4,256 ms | 2,871 / 3,419 ms |
+
+Eight reads at a time is the faster way here: about a third less time on the read, and
+about the same on the start as a whole, because the disk and the mounting of the files set the
+pace rather than the CPU. The page keeps the eight. The peak cost is memory: at most eight
+files' bytes are held besides the one being mounted, and the largest file in the install is a
+few tens of megabytes.

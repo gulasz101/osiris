@@ -277,14 +277,13 @@ async function loadFolder(list) {
 
     // Everything under the root is mounted under /PharaohData, the folder `start_game`
     // looks for, so the game does not care how deep the root sat in the chosen folder.
-    // The bar says how far the read has got, and `readAll` keeps a few reads going at
-    // the same time; `design.md` records why the limit is the one it is.
+    // The bar says how far the read has got, and `readAll` keeps eight reads going at the
+    // same time; `design.md` records that this is the faster of the two measured ways.
     await readAll(
         files,
         (entry) => entry.file.arrayBuffer(),
         (entry, bytes) => mount_file("PharaohData/" + entry.path, new Uint8Array(bytes)),
-        progress,
-        1
+        progress
     );
     console.log(
         "osiris web: read " + files.length + " files in " +

@@ -20,9 +20,28 @@
         p { max-width: 40ch; opacity: 0.85; }
         #status { margin-top: 1em; color: #ffd700; min-height: 1.5em; }
         #start.drag { outline: 3px dashed #ffd700; }
-        /* Small, out of the way, and reachable while the game covers the page. */
+        /* The start page covers the game once the game is running, so the corner link can
+           bring it back over the top. */
+        #start.over-game {
+            position: fixed; inset: 0; z-index: 1; background: #1a1a2e;
+            overflow: auto; padding: 1em;
+        }
+        /* The game's own controls, small and out of the way, over the canvas. */
+        #controls {
+            position: fixed; right: 0.75em; bottom: 0.75em; z-index: 2;
+            display: flex; gap: 0.4em;
+        }
+        #controls[hidden] { display: none; }
+        #controls button {
+            padding: 0.2em 0.6em; font-size: 0.75rem; color: #ddd;
+            background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 0.3em; cursor: pointer;
+        }
+        #controls button:hover { color: #1a1a2e; background: #ffd700; }
+        /* Small, out of the way, and reachable while the game covers the page. The game's
+           own controls sit in the right corner, so this one takes the left. */
         #forget {
-            position: fixed; right: 0.75em; bottom: 0.75em; padding: 0.2em 0.6em;
+            position: fixed; left: 0.75em; bottom: 0.75em; padding: 0.2em 0.6em;
             font-size: 0.75rem; color: #ddd; background: rgba(0, 0, 0, 0.55);
             border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 0.3em; cursor: pointer;
         }
@@ -39,6 +58,10 @@
         <p id="status"></p>
     </div>
     <button id="forget" hidden>Forget game files</button>
+    <div id="controls" hidden>
+        <button id="fullscreen">Fullscreen</button>
+        <button id="page">Page</button>
+    </div>
     <script src="store.js"></script>
     <script src="audio.js"></script>
     <script type="module" src="main.js"></script>

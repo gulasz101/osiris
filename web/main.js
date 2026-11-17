@@ -24,6 +24,9 @@ const startDiv = document.getElementById("start");
 const canvas = document.getElementById("osiris");
 const status = document.getElementById("status");
 const forgetButton = document.getElementById("forget");
+const controls = document.getElementById("controls");
+const fullscreenButton = document.getElementById("fullscreen");
+const pageButton = document.getElementById("page");
 
 // `?mission=N` starts that mission straight away, as `osiris --mission N` does on the
 // desktop. A value that is not a whole number is refused before the game starts.
@@ -93,17 +96,73 @@ function fitCanvas() {
  */
 function start() {
     startDiv.style.display = "none";
+    startDiv.hidden = true;
     canvas.hidden = false;
     // The canvas is the window, so winit's canvas window has the right size from the start.
     fitCanvas();
+    // Only the game is on screen now, with these controls on top of it.
+    if (controls) controls.hidden = false;
     status.textContent = "Starting game...";
     start_game(mission);
+}
+
+/**
+ * Put the canvas in full screen, or leave it when the page is already there. The browser
+ * only allows this from a real gesture, which the button and the F11 key provide; Escape
+ * leaves full screen by itself.
+ */
+async function toggleFullscreen() {
+    try {
+        if (document.fullscreenElement) {
+            await document.exitFullscreen();
+        } else {
+            await canvas.requestFullscreen();
+        }
+    } catch (err) {
+        // A browser that refuses (no permission, no user gesture) says so; the game keeps
+        // playing in the window.
+        console.warn("osiris web: could not change full screen", err);
+    }
+}
+
+if (fullscreenButton) {
+    fullscreenButton.addEventListener("click", toggleFullscreen);
+}
+
+// F11 inside the page asks for full screen the same way the button does. The listener is on
+// the document so it works wherever the keyboard focus is.
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "F11" || canvas.hidden) return;
+    event.preventDefault();
+    toggleFullscreen();
+});
+
+/** Bring the start page back over the running game, or hide it again. */
+function togglePage() {
+    const showing = startDiv.classList.contains("over-game");
+    if (showing) {
+        startDiv.hidden = true;
+        startDiv.classList.remove("over-game");
+        startDiv.style.display = "none";
+    } else {
+        startDiv.hidden = false;
+        startDiv.classList.add("over-game");
+        startDiv.style.display = "flex";
+    }
+    if (pageButton) pageButton.textContent = showing ? "Page" : "Back to game";
+}
+
+if (pageButton) {
+    pageButton.addEventListener("click", togglePage);
 }
 
 /** Put the start screen back and say what went wrong, leaving the page usable. */
 function fail(err) {
     console.error(err);
+    startDiv.hidden = false;
     startDiv.style.display = "flex";
+    startDiv.classList.remove("over-game");
+    if (controls) controls.hidden = true;
     canvas.hidden = true;
     status.textContent = "Error: " + (err && err.message ? err.message : err);
 }
@@ -133,7 +192,10 @@ if (storedFiles > 0) {
         // A stored copy the game cannot use must never leave the player stuck on it.
         console.warn("osiris web: the stored game files cannot start the game, forgetting them", err);
         await forgetGameFiles();
+        startDiv.hidden = false;
         startDiv.style.display = "flex";
+        startDiv.classList.remove("over-game");
+        if (controls) controls.hidden = true;
         canvas.hidden = true;
         status.textContent =
             "The game files kept in the browser cannot start the game. Choose your Pharaoh folder again.";
@@ -255,6 +317,9 @@ folderInput.addEventListener("change", async () => {
         // the page was reading it) must say so in the status line, not sit there silently.
         console.error("osiris web: reading the chosen folder failed", err);
         status.textContent = "Error: " + err.message;
+        startDiv.hidden = false;
         startDiv.style.display = "flex";
+        startDiv.classList.remove("over-game");
+        if (controls) controls.hidden = true;
     }
 });

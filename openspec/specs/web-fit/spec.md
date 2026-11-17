@@ -1,7 +1,11 @@
 # web-fit Specification
 
 ## Purpose
-TBD - created by archiving change web-fit. Update Purpose after archive.
+A browser window is not a fixed 1024x768 screen: the player may have a 1920x1080 monitor, a
+1280x720 laptop or a phone-shaped window on a high-density display. This capability gives the
+canvas the window's own size at the screen's pixel ratio, keeps a 1024x768 floor below which the
+page scrolls rather than shrinking the picture, and follows the window while the game runs, so
+the game looks the same as it does on the desktop and takes the whole page.
 
 ## Requirements
 

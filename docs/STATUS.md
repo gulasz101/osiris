@@ -61,6 +61,14 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   `not implemented on this platform` panic in the console.
 - **The main menu.** The player's folder is mounted and the game opens on its main menu
   (`web-start`). `OSIRIS_DATA=<folder> scripts/web-smoke.sh` prints `osiris web: main menu`.
+- **A bar while the files load, and a faster start.** While the folder is read the page draws a
+  bar over the picture — `Reading game files: 412 / 1335 (31%)`, repainted at most every 100 ms —
+  and reads eight files at a time rather than one, which on a full install took the read from
+  about 4 seconds to about 2.7. Drag and drop and the copy in browser storage go through the
+  same bar, and the log says how long the start took (`web-progress`).
+  `OSIRIS_DATA=<folder> SMOKE_PICK=1 scripts/web-smoke.sh` prints
+  `osiris web: loading bar OK (...)` and `osiris web: menu after N ms`, and saves the picture it
+  took to `/tmp/osiris-web-loading.png`.
 - **Your folder is remembered.** After the first load the page copies the game files into the
   browser's own storage (the Origin Private File System: about 780 MB for a full install, with
   PDFs, archives and installers left out) and writes a marker only once every file is there. On
@@ -122,7 +130,9 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   environment variables `OSIRIS_DATA` (game files), `SMOKE_MISSION=direct|menu`, `SMOKE_MOVIE=intro`,
   `SMOKE_ROOT` and `SMOKE_BASE` (serve another copy of the page, for example `out/site` under
   `/osiris/`), `SMOKE_REMEMBER=1` (copy the files into browser storage, reload, and start with no
-  picker) and `SMOKE_TIMEOUT` (seconds, default 120). `SMOKE_WRAP=outer/inner` stages the game
+  picker), `SMOKE_PICK=1` (hand the staged folder to the page's own folder picker, so the page's
+  reading path and the loading bar run; not with `SMOKE_REMEMBER`) and `SMOKE_TIMEOUT` (seconds,
+  default 120). `SMOKE_WRAP=outer/inner` stages the game
   files two folders deeper and loads them through the page's own folder picker, as a GOG install
   sits; that run prints `osiris web: city started and ran 2 months: 1, 2`.
 - `scripts/no-game-files.sh` prints `no-game-files: OK` when no Pharaoh file is tracked in git.

@@ -126,6 +126,9 @@ your computer (nothing is uploaded). To run the same page from a checkout, run
 Adding `?mission=N` to the page's address starts mission `N` straight away, as
 `--mission N` does on the desktop (`?mission=0` is Nubt, the first mission).
 
+The movies play in the page with their sound, the intro and the five periods' movies alike,
+and Escape skips one, as on the desktop.
+
 ## Building
 
 With a recent stable Rust toolchain:

@@ -7,6 +7,11 @@
     <style>
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { height: 100%; font-family: sans-serif; background: #1a1a2e; color: #eee; }
+        /* The game's canvas fills the window; the start page sits over it until the game
+           starts. `[hidden]` has to be spelled out: `display: block` here would otherwise
+           beat the browser's own rule for the hidden attribute. */
+        #osiris { display: block; background: #000; }
+        #osiris[hidden] { display: none; }
         #start {
             display: flex; flex-direction: column; align-items: center;
             justify-content: center; min-height: 100vh; gap: 1em; text-align: center;

@@ -8,6 +8,7 @@ import init, {
     start_game,
 } from "./pkg/osiris.js";
 import { filesFromDrop, filesFromInput, filesUnder, findGameRoot } from "./folder.js";
+import { fitSize } from "./fit.js";
 import { forget as forgetGameFiles, restore as restoreGameFiles, save as saveGameFiles } from "./opfs.js";
 
 let busy = false;
@@ -68,18 +69,33 @@ try {
 }
 
 /**
+ * Fill the window with the canvas, which is what the game is drawn on: its CSS size is the
+ * window's and its bitmap is that size times the device pixel ratio. Winit's web backend
+ * watches the canvas and reports the new size as a `Resized` event, which is how the game
+ * learns to resize its surface.
+ */
+function fitCanvas() {
+    const size = fitSize(window.innerWidth, window.innerHeight, window.devicePixelRatio);
+    canvas.style.width = size.width + "px";
+    canvas.style.height = size.height + "px";
+    // Assigning the bitmap size clears the canvas, so only do it when it really changes.
+    if (canvas.width !== size.pixelWidth || canvas.height !== size.pixelHeight) {
+        canvas.width = size.pixelWidth;
+        canvas.height = size.pixelHeight;
+    }
+    console.log("osiris web: set canvas to " + canvas.width + "x" + canvas.height);
+    return size;
+}
+
+/**
  * Show the canvas and start the game. The game files must be mounted already, either by
  * `loadFolder` from the player's folder or from the copy in browser storage.
  */
 function start() {
     startDiv.style.display = "none";
     canvas.hidden = false;
-    // Set explicit dimensions so winit's canvas window is not 1×1.
-    canvas.width = 1280;
-    canvas.height = 768;
-    canvas.style.width = "1280px";
-    canvas.style.height = "768px";
-    console.log("osiris web: set canvas to " + canvas.width + "x" + canvas.height);
+    // The canvas is the window, so winit's canvas window has the right size from the start.
+    fitCanvas();
     status.textContent = "Starting game...";
     start_game(mission);
 }

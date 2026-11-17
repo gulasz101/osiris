@@ -18,12 +18,13 @@ if [ ! -d "$dir" ]; then
   exit 1
 fi
 
-# The only files the site may hold: the page, its five scripts, the wasm build
+# The only files the site may hold: the page, its six scripts, the wasm build
 # and an empty .nojekyll so GitHub Pages serves the files verbatim.
 allowed="
 .nojekyll
 index.html
 main.js
+fit.js
 folder.js
 store.js
 audio.js

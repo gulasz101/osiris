@@ -11,41 +11,6 @@ feeling.
 
 ## Requirements
 
-### Requirement: A progress bar while the game files are read
-While the page reads the player's game files, after a folder pick, after a drop, or while it
-restores the copy in browser storage, it SHALL show a bar over the canvas with the text
-`Reading game files: <done> / <total> (<percent>%)`, where the percent is
-`done / total` rounded to the nearest whole number. The page SHALL repaint the bar at most
-every 100 ms, SHALL show the final count when the read ends, and SHALL hide the bar afterwards.
-
-#### Scenario: reading a full install
-- GIVEN a Pharaoh folder of 1335 files
-- WHEN the player picks it
-- THEN the page shows `Reading game files: 412 / 1335 (31%)` partway through the read
-- AND the bar repaints no more often than every 100 ms
-
-#### Scenario: a copy restored from browser storage
-- GIVEN a complete copy of the game files in the browser's storage
-- WHEN the player opens the page
-- THEN the same bar shows the same text while the copy is read
-
-#### Scenario: a file cannot be read
-- GIVEN the folder was moved while the page was reading it
-- WHEN one read fails
-- THEN the bar goes away and the status line says what went wrong
-- AND the game is not started from a half-read folder
-
-### Requirement: The files are read with up to eight reads at a time
-The page SHALL read the game files with at most eight reads in flight at the same time, instead
-of one file at a time, and SHALL mount every file. When a read fails, the page SHALL stop the
-other reads rather than mount files after the failure.
-
-#### Scenario: a full install
-- GIVEN 1335 game files
-- WHEN the page reads them
-- THEN never more than eight reads are in flight
-- AND all 1335 files are mounted
-
 ### Requirement: The browser build logs how long the start took
 The browser build SHALL log `osiris web: menu after <N> ms` at the main menu, where `N` is the
 time since the page started, or since the player picked their folder when they picked one. A
@@ -82,3 +47,28 @@ modes SHALL keep passing.
 - THEN the page shows the bar while it reads the files
 - AND `/tmp/osiris-web-loading.png` shows the bar
 - AND the run prints `osiris web: loading bar OK` and `osiris web: menu after N ms`
+
+### Requirement: A progress bar while the game files are copied to browser storage
+A folder pick, a drop and a restore from browser storage SHALL NOT read the game files, and SHALL
+NOT show a progress bar. While the page copies the files into browser storage after the game has
+started, it SHALL show a bar over the canvas with the text
+`Reading game files: <done> / <total> (<percent>%)`, repaint it at most every 100 ms, show the
+final count when the copy ends, and hide it afterwards.
+
+#### Scenario: picking a folder
+- GIVEN a Pharaoh folder of 1335 files
+- WHEN the player picks it
+- THEN the page logs `osiris web: indexed 1335 files (<x> MB) in <m> ms`
+- AND no progress bar is shown, because nothing was read
+
+#### Scenario: copying the files into browser storage
+- GIVEN the game is running and the page is copying the picked files into browser storage
+- WHEN part of the copy is done
+- THEN the page shows `Reading game files: 412 / 1335 (31%)`, with the percent rounded
+- AND the bar is hidden once the copy finishes
+
+#### Scenario: a copy that fails
+- GIVEN the page is copying the game files into browser storage
+- WHEN one of the files cannot be read
+- THEN the bar goes away
+- AND the page logs what went wrong and drops the incomplete copy

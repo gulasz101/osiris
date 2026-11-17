@@ -6,4 +6,4 @@
 - [x] 1.4 `web.rs`: `mount_lazy`, the `osirisFiles.read` import, `lazy_read`, registered next to `set_change_hook` (design 4). Check: `cargo check --target wasm32-unknown-unknown -p osiris-app` and `cargo test --workspace` pass.
 - [x] 1.5 The picker and the OPFS restore register `File`s and call `mount_lazy` (design 5). Check: `OSIRIS_DATA=<folder> scripts/web-smoke.sh` prints `osiris web: indexed N files` and `osiris web: main menu`, and `OSIRIS_DATA=<folder> SMOKE_REMEMBER=1 scripts/web-smoke.sh` passes.
 - [x] 1.6 The memory number. Check: `OSIRIS_DATA=<folder> SMOKE_SOAK=1 scripts/web-smoke.sh` passes and its `soak OK` line shows `memory start` below 300 MB; `SMOKE_SAVES=1` and `SMOKE_MOVIE=1` with the same folder pass. Write the soak line in `design.md` section 6 and paste it in the issue comment.
-- [ ] 1.7 The STATUS.md lines (the new memory number), the archive. Check: `scripts/check.sh` ends with `CHECK OK` and `scripts/no-game-files.sh` passes.
+- [x] 1.7 The STATUS.md lines (the new memory number), the archive. Check: `scripts/check.sh` ends with `CHECK OK` and `scripts/no-game-files.sh` passes.

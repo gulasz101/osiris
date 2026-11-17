@@ -149,6 +149,22 @@ if (forgetButton) {
     });
 }
 
+// A window change resizes the canvas the same way the start did; winit's resize observer
+// turns the new CSS size into a `Resized` event, and the game resizes its surface with it.
+window.addEventListener("resize", () => {
+    if (!canvas.hidden) fitCanvas();
+});
+
+// Leaving full screen has the browser lay the page out again, and winit puts back the
+// windowed size it remembered, so the canvas is fitted to the window once more.
+document.addEventListener("fullscreenchange", () => {
+    if (canvas.hidden) return;
+    // The page has not been laid out for the new screen size yet when this fires.
+    requestAnimationFrame(() => {
+        if (!canvas.hidden) fitCanvas();
+    });
+});
+
 /**
  * Copy the picked game files into browser storage for the next load. Runs on its own
  * after the game has started, so it never holds the start up, and never fails it.

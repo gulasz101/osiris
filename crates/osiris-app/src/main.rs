@@ -1446,15 +1446,24 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => {
                 if let Some(gfx) = &mut self.gfx {
                     gfx.resize(size.width, size.height);
-                    let maximized = gfx.window.is_maximized();
-                    let fullscreen = gfx.window.fullscreen().is_some();
-                    // Only a plain resize (not a maximize or a fullscreen switch)
-                    // changes the size to come back to.
-                    if !maximized && !fullscreen {
-                        let logical: winit::dpi::LogicalSize<u32> = size.to_logical(gfx.window.scale_factor());
-                        self.windowed_size = (logical.width.max(1), logical.height.max(1));
+                    // In the browser this event comes from winit's own resize observer on the
+                    // canvas, which is how a window change reaches the surface; the log line is
+                    // what the smoke test reads to know the surface followed the canvas.
+                    #[cfg(target_arch = "wasm32")]
+                    log::info!("osiris web: resize to {}x{}", size.width, size.height);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let maximized = gfx.window.is_maximized();
+                        let fullscreen = gfx.window.fullscreen().is_some();
+                        // Only a plain resize (not a maximize or a fullscreen switch)
+                        // changes the size to come back to.
+                        if !maximized && !fullscreen {
+                            let logical: winit::dpi::LogicalSize<u32> =
+                                size.to_logical(gfx.window.scale_factor());
+                            self.windowed_size = (logical.width.max(1), logical.height.max(1));
+                        }
+                        save_window_state(self.windowed_size, maximized, fullscreen);
                     }
-                    save_window_state(self.windowed_size, maximized, fullscreen);
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {

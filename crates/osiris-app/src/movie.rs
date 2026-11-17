@@ -43,7 +43,6 @@ pub fn path(data: &Path, name: &str) -> Option<PathBuf> {
 
 /// Opens movie `name` from the game data and starts it (its sound on `audio` at
 /// `volume`), or `None` if it isn't there.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn start(data: &Path, name: &str, audio: Option<&Audio>, volume: f32) -> Option<Movie> {
     let path = path(data, name)?;
     let movie = match osiris_bink::Movie::open(&path) {
@@ -60,26 +59,10 @@ pub fn start(data: &Path, name: &str, audio: Option<&Audio>, volume: f32) -> Opt
     Some(Movie::run(name, movie, sound))
 }
 
-/// Opens movie `name` from the game data and starts it (its sound on `audio` at
-/// `volume`), or `None` if it isn't there.
-#[cfg(target_arch = "wasm32")]
-pub fn start(_data: &Path, name: &str, _audio: Option<&Audio>, _volume: f32) -> Option<Movie> {
-    log::info!("movies are not played in the browser yet: {name}");
-    None
-}
-
 /// Opens movie `name` without sound, for screenshots.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn silent(data: &Path, name: &str) -> Option<Movie> {
     let movie = osiris_bink::Movie::open(path(data, name)?).ok()?;
     Some(Movie::run(name, movie, None))
-}
-
-/// Opens movie `name` without sound, for screenshots.
-#[cfg(target_arch = "wasm32")]
-pub fn silent(_data: &Path, name: &str) -> Option<Movie> {
-    log::info!("movies are not played in the browser yet: {name}");
-    None
 }
 
 enum Decoded {
@@ -110,22 +93,61 @@ pub struct Movie {
 
 #[cfg(target_arch = "wasm32")]
 pub struct Movie {
+    name: String,
     width: u32,
     height: u32,
+    fps: f64,
+    frames: usize,
+    /// The movie file, decoded a few frames at a time by [`Movie::decode_some`].
+    bink: osiris_bink::Movie<osiris_vfs::Reader>,
+    /// Where the decoded frames' sound goes, when the movie has sound.
+    feed: Option<osiris_audio::StreamFeed>,
+    /// Decoded frames not yet due, oldest first; at most `AHEAD`.
+    queue: std::collections::VecDeque<(usize, Vec<u8>)>,
     /// The frame on screen, and whether it still needs uploading.
     shown: Option<usize>,
     picture: Vec<u8>,
     dirty: bool,
     handle: Option<DynamicHandle>,
+    decoded_all: bool,
     sound: Option<StreamSound>,
     /// When the movie started, the clock without sound.
     start: Instant,
+    /// Whether the browser log already says the movie is over.
+    logged_done: bool,
     pub done: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl Movie {
+    /// Takes the movie file and the frames are decoded later, a few per call, on the
+    /// main thread: `std::thread::spawn` does not exist in the browser.
+    fn run(name: &str, movie: osiris_bink::Movie<osiris_vfs::Reader>, sound: Option<StreamSound>) -> Movie {
+        let (width, height, fps, frames) = (movie.width(), movie.height(), movie.fps(), movie.frames() as usize);
+        log::info!("osiris web: movie {name} started");
+        Movie {
+            name: name.to_owned(),
+            width,
+            height,
+            fps,
+            frames,
+            bink: movie,
+            feed: sound.as_ref().map(|s| s.feed()),
+            queue: std::collections::VecDeque::new(),
+            shown: None,
+            picture: Vec::new(),
+            dirty: false,
+            handle: None,
+            decoded_all: false,
+            sound,
+            start: Instant::now(),
+            logged_done: false,
+            done: false,
+        }
+    }
+
     pub fn update(&mut self) {}
+
     pub fn seek_blocking(&mut self, _seconds: f64) {}
 }
 

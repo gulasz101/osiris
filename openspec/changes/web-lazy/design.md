@@ -94,7 +94,12 @@ water is what the game holds decoded (textures, the city) plus the largest files
 same moment. The target is `memory start` below 300 MB in the soak run. The soak line already
 prints it; no new logging.
 
-Measured (task 1.6): _fill in the soak line before and after_.
+Measured (task 1.6): `OSIRIS_DATA=<folder> SMOKE_SOAK=1 scripts/web-smoke.sh` prints
+`osiris web: soak OK (24 months, min fps 6, memory start 245 MB end 245 MB)` and
+`osiris web: custom map soak OK (6 months on Small Oasis, min fps 8, memory start 245 MB end
+245 MB)`, against `memory start 931 MB end 931 MB` before this change. The month lines hold at
+`256638976` bytes from month 0 to month 11, so the high water is the game's decoded data, not
+the install.
 
 ## 7. Movies and sound
 `osiris_bink::Movie::new(osiris_vfs::open(path)?)` and the audio loaders use `open`, which goes

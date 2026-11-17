@@ -113,6 +113,20 @@ if (SAVES && (DIRECT || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null ||
     console.error("FAIL: SMOKE_SAVES runs with no SMOKE_MISSION, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT or SMOKE_PICK");
     process.exit(1);
 }
+// `1` proves the page reads a registered `File` synchronously on the main thread, which
+// is how `files.js` gives the game a file it never copied into memory (`web-lazy`). It
+// builds a 40 MB file in the page, registers it and reads it back, so it needs no game
+// data at all and runs on its own.
+const SYNCREAD_RAW = (process.env.SMOKE_SYNCREAD ?? "").trim();
+const SYNCREAD = SYNCREAD_RAW === "1";
+if (SYNCREAD_RAW !== "" && !SYNCREAD) {
+    console.error("FAIL: SMOKE_SYNCREAD must be 1 or unset (got " + SYNCREAD_RAW + ")");
+    process.exit(1);
+}
+if (SYNCREAD && (DIRECT || MENU || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE)) {
+    console.error("FAIL: SMOKE_SYNCREAD runs on its own, with no SMOKE_MISSION, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT or SMOKE_PICK");
+    process.exit(1);
+}
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -1669,6 +1683,55 @@ async function run() {
         if (!foundReady) {
             console.error("FAIL: never saw 'osiris web: ready'");
             process.exitCode = 1;
+            return;
+        }
+
+        // ── A file read synchronously off the page's main thread ──────
+        // `files.js` has to hand the game a file's bytes at once, from the `File` the
+        // picker or browser storage gave the page. A synchronous `XMLHttpRequest` for
+        // the file's `blob:` URL is the only way to do that outside a Worker (`web-lazy`
+        // design 1), so prove it here, on 40 MB, before anything is built on it.
+        if (SYNCREAD) {
+            const sync = await page.evaluate(async (base) => {
+                const { register, read } = await import(base + "files.js");
+                const size = 40 * 1024 * 1024;
+                const data = new Uint8Array(size);
+                // `getRandomValues` fills at most 65536 bytes per call.
+                for (let at = 0; at < size; at += 65536) {
+                    crypto.getRandomValues(data.subarray(at, Math.min(at + 65536, size)));
+                }
+                const url = "/PharaohData/Data/sync-read.dat";
+                register(url, new File([data], "sync-read.dat"));
+                const started = performance.now();
+                const bytes = read(url);
+                const ms = Math.round(performance.now() - started);
+                let firstDifference = -1;
+                for (let i = 0; i < size; i += 1) {
+                    if (bytes[i] !== data[i]) {
+                        firstDifference = i;
+                        break;
+                    }
+                }
+                // A path the page never registered is an error that names the path.
+                let missing = "";
+                try {
+                    read("/PharaohData/Data/not-registered.dat");
+                } catch (error) {
+                    missing = String(error.message ?? error);
+                }
+                return { ms, length: bytes.length, size, firstDifference, missing };
+            }, BASE);
+
+            const named = sync.missing.includes("/PharaohData/Data/not-registered.dat");
+            if (sync.length !== sync.size || sync.firstDifference !== -1 || !named) {
+                console.error(
+                    "FAIL: the synchronous read did not give the file back (" +
+                    JSON.stringify(sync) + ")"
+                );
+                process.exitCode = 1;
+            } else if (process.exitCode !== 1) {
+                console.log("osiris web: sync read OK (40 MB in " + sync.ms + " ms)");
+            }
             return;
         }
 

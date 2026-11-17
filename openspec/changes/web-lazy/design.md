@@ -21,7 +21,11 @@ Task 1.2 proves this works in the smoke test's Chromium before any other task bu
 writes the time for a 40 MB file here. If it does not work, stop: block the issue with the
 error. Do not try a different mechanism without a new plan.
 
-Measured (task 1.2): _fill in: `sync read OK (40 MB in N ms)`_.
+Measured (task 1.2): `osiris web: sync read OK (40 MB in 502 ms)` from
+`SMOKE_SYNCREAD=1 scripts/web-smoke.sh`. All 40 MB came back byte for byte in one synchronous
+`XMLHttpRequest`, and a path the page never registered threw an error naming that path. Half a
+second for a file that size is slow enough that nothing on the start path may read a large file
+twice, so a lazy entry keeps no bytes (design 3).
 
 ## 2. `web/files.js`
 ```js

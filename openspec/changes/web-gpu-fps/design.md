@@ -75,9 +75,37 @@ After the page starts, with `SMOKE_GPU=1`: if no adapter line came, FAIL
 adapter, use `SMOKE_HEADED=1` and write which one worked in design 3.
 
 ## 3. The numbers (task 1.3)
-_Task 1.3 pastes here: the adapter line, `soak OK (...)` and the `frame ms ...` line of the
-headless run and of the GPU run, and which mode (headless or headed) gave the GPU._
+
+Both runs: `OSIRIS_DATA=/Users/paperclip/PharaohData/Akhenaten/resources`, same M1 Air host,
+same commit, one after the other, both exit 0.
+
+**The GPU run** (`SMOKE_SOAK=1 SMOKE_GPU=1`, headless, no `SMOKE_HEADED` needed: headless got
+the GPU on the first try, so the Metal flags above are enough on this host):
+
+    osiris web: gfx backend WebGL2 adapter ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)
+    osiris web: frame ms sim 7.1 render 1.4 io 0.1 other 183.1 (worst sim 20.0 render 1.5 io 0.0)
+    osiris web: soak OK (24 months, min fps 5, memory start 294 MB end 294 MB)
+    osiris web: custom map soak OK (6 months on Small Oasis, min fps 5, memory start 294 MB end 294 MB)
+    osiris web: editor OK (Small Oasis edited and saved as /user/maps/Soak Edit.map)
+    osiris web: GPU run OK on ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version) via WebGL2
+
+**The default soak** (`SMOKE_SOAK=1`, the unchanged run, `--use-angle=gl`):
+
+    osiris web: gfx backend WebGL2 adapter ANGLE (Apple, Apple M1, OpenGL 4.1)
+    osiris web: frame ms sim 9.1 render 2.7 io 0.3 other 171.1 (worst sim 12.1 render 17.2 io 11.4)
+    osiris web: soak OK (24 months, min fps 5, memory start 294 MB end 294 MB)
+    osiris web: custom map soak OK (6 months on Small Oasis, min fps 5, memory start 294 MB end 294 MB)
+    osiris web: editor OK (Small Oasis edited and saved as /user/maps/Soak Edit.map)
+
+Both are the same Apple M1, one through ANGLE on Metal and one through ANGLE on OpenGL. Our own
+work is 8.6 ms per frame on Metal and 12.1 ms on OpenGL; `other` is 183.1 ms and 171.1 ms. Asking
+for Metal changed neither the fps (5 both) nor the shape of the split, so the GPU was never what
+held this run back.
 
 ## 4. What limits the frame on a real GPU
-_Task 1.3 writes one sentence: the biggest part of the GPU run's frame split. If GPU min fps is
-under 20, name it as the next thing to fix. Do not fix it here._
+
+The biggest part of the GPU run's frame is `other` at 183.1 ms of a 191.7 ms frame, the time
+between our frames that the browser spends and that neither sim, render nor io accounts for;
+because Metal and OpenGL land on the same 5 fps with the same `other`, the limit is the
+browser's own frame pacing here, not the GPU and not our 8.6 ms of work.
+

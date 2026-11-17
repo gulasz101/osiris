@@ -38,6 +38,11 @@ mod overlay;
 mod mission_brief;
 mod progress;
 mod recording;
+// The saved games the page can list, download and import: plain code, built for both targets
+// so its test runs in `cargo test` as well as in the browser build. Only the browser's page
+// calls it, so the desktop build would report it as unused.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod saves;
 mod script;
 mod sidebar;
 mod tomb_view;
@@ -338,7 +343,7 @@ pub fn player_saves_dir() -> PathBuf {
 
 /// A family folder's exact display name, read back from its `name.txt`, falling
 /// back to the folder name itself if that's missing.
-fn family_display_name(dir: &Path) -> String {
+pub(crate) fn family_display_name(dir: &Path) -> String {
     osiris_vfs::read_to_string(dir.join("name.txt"))
         .ok()
         .map(|s| s.trim().to_owned())

@@ -2,6 +2,7 @@ import init, {
     debug_city,
     debug_editor,
     debug_menu_buttons,
+    debug_top_reads,
     debug_write_user,
     debug_read_user,
     delete_save,
@@ -63,6 +64,8 @@ globalThis.debug_city = debug_city;
 globalThis.set_soak = set_soak;
 globalThis.debug_write_user = debug_write_user;
 globalThis.debug_read_user = debug_read_user;
+// The paths the soak run's lazy reads cost the most time in (web-perf).
+globalThis.debug_top_reads = debug_top_reads;
 globalThis.mount_exact = mount_exact;
 globalThis.mount_file = mount_file;
 globalThis.mount_lazy = mount_lazy;

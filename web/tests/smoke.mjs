@@ -36,6 +36,19 @@ if (WRAP !== "" && !WRAP.split("/").every((part) => /^[A-Za-z0-9._-]+$/.test(par
     console.error("FAIL: SMOKE_WRAP must be folder names separated by '/', like outer/inner (got " + WRAP + ")");
     process.exit(1);
 }
+// `1` proves the page remembers the game files: it reads them through the page's own
+// picker, waits for the copy into the browser's own storage, reloads the page in the same
+// browser profile and expects the main menu with no picker.
+const REMEMBER_RAW = (process.env.SMOKE_REMEMBER ?? "").trim();
+const REMEMBER = REMEMBER_RAW === "1";
+if (REMEMBER_RAW !== "" && !REMEMBER) {
+    console.error("FAIL: SMOKE_REMEMBER must be 1 or unset (got " + REMEMBER_RAW + ")");
+    process.exit(1);
+}
+if (REMEMBER && (DIRECT || MENU || INTRO || WRAP !== "")) {
+    console.error("FAIL: SMOKE_REMEMBER runs on its own, with no SMOKE_MISSION, SMOKE_MOVIE or SMOKE_WRAP");
+    process.exit(1);
+}
 // The wrapped run starts the game from the page's own picker as soon as the files are
 // read, so the menu modes (which click and press keys before starting) do not apply.
 if (WRAP !== "" && (INTRO || MENU)) {
@@ -253,6 +266,90 @@ async function runDirectMission({ alreadyStarted = false } = {}) {
         process.exitCode = 1;
     } else {
         console.log("osiris web: city started and ran " + months.length + " months: " + months.join(", "));
+    }
+}
+
+/**
+ * SMOKE_REMEMBER=1: the page keeps the game files. Read them through the page's own picker
+ * (the copy needs the File objects a pick gives it), wait for the copy into the browser's
+ * own storage, reload the page in the same browser profile, and expect the main menu with
+ * no picker and the same number of files.
+ */
+async function runRemember(stagingDir) {
+    const pickFailure = (err) => {
+        console.error("FAIL: could not give the picker " + stagingDir + ": " + err.message);
+        process.exitCode = 1;
+    };
+    await page.setInputFiles("#folder", stagingDir).catch(pickFailure);
+    if (process.exitCode === 1) return;
+
+    const copiedLine = (messages) =>
+        messages.find((m) => m.includes("osiris web: game files copied to browser storage ("));
+    const copied = await until(
+        () => panicLine() !== null || copiedLine(consoleMessages) !== undefined,
+        600_000,
+        500
+    );
+    for (const m of consoleMessages) console.log(m);
+    const copiedCount = Number(/\((\d+) files\)/.exec(copiedLine(consoleMessages) ?? "")?.[1] ?? 0);
+    if (panicLine() !== null) {
+        console.error("FATAL: wasm panic detected: " + panicLine());
+        process.exitCode = 1;
+        return;
+    }
+    if (!copied || copiedCount === 0) {
+        console.error("FAIL: the page never copied the game files into browser storage");
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+        process.exitCode = 1;
+        return;
+    }
+
+    // The copy has the bytes; the staged folder can go before the reload on purpose, so the
+    // restored run cannot read the game anywhere but the browser's own storage.
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+    consoleMessages.length = 0;
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {
+        /* the restore line is polled below */
+    });
+
+    const restoredLine = () =>
+        consoleMessages.find((m) => m.includes("osiris web: game files restored from browser storage ("));
+    const restored = await until(
+        () => panicLine() !== null || restoredLine() !== undefined,
+        600_000,
+        500
+    );
+    const restoredCount = Number(/\((\d+) files\)/.exec(restoredLine() ?? "")?.[1] ?? 0);
+    const menu = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: main menu")),
+        600_000,
+        500
+    );
+    for (const m of consoleMessages) console.log(m);
+
+    // No picker this time: the file input is empty and the start screen is gone.
+    const picker = await page.evaluate(() => ({
+        files: document.getElementById("folder").files.length,
+        start: getComputedStyle(document.getElementById("start")).display,
+    }));
+
+    const panic = panicLine();
+    if (panic) {
+        console.error("FATAL: wasm panic detected: " + panic);
+        process.exitCode = 1;
+    } else if (!restored || restoredCount !== copiedCount) {
+        console.error(
+            "FAIL: the page restored " + restoredCount + " of the " + copiedCount + " stored game files"
+        );
+        process.exitCode = 1;
+    } else if (picker.files !== 0 || picker.start !== "none") {
+        console.error("FAIL: the folder picker was still on screen after the restore (" + JSON.stringify(picker) + ")");
+        process.exitCode = 1;
+    } else if (!menu) {
+        console.error("FAIL: never saw 'osiris web: main menu' after restoring the game files");
+        process.exitCode = 1;
+    } else {
+        console.log("osiris web: remember OK (" + restoredCount + " files)");
     }
 }
 
@@ -858,6 +955,11 @@ async function run() {
             // Stage files on disk so the HTTP server can serve them.
             const stagingDir = stageFiles(osirisData, relPaths, WRAP);
             console.log("osiris web: staged to " + stagingDir);
+
+            if (REMEMBER) {
+                await runRemember(stagingDir);
+                return;
+            }
 
             if (WRAP) {
                 // Give the page the whole staged folder, two folders above the game files,

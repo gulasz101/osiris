@@ -17,4 +17,8 @@ fi
 if [ -n "${SMOKE_MOVIE:-}" ]; then
     TIMEOUT=600
 fi
+# A remember run copies the whole install into the browser's storage and then reads it back.
+if [ -n "${SMOKE_REMEMBER:-}" ]; then
+    TIMEOUT=900
+fi
 timeout "$TIMEOUT" node smoke.mjs

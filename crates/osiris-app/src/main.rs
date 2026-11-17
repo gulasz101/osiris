@@ -2020,6 +2020,7 @@ impl App {
                     e.dirty,
                     e.path.as_deref(),
                     e.view.last_said(),
+                    e.popup_name(),
                     e.tool.debug_name(),
                 ));
             }

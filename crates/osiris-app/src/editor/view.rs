@@ -373,6 +373,16 @@ impl Editor {
         self.view.top = Some(bar);
     }
 
+    /// The name of the popup that is open, for the browser smoke test (`web-soak`): the
+    /// save-name box and the map sizes are the editor's own, and the test cannot see them.
+    pub fn popup_name(&self) -> &'static str {
+        match &self.view.popup {
+            Some(Popup::Sizes) => "sizes",
+            Some(Popup::SaveName(_)) => "save-name",
+            None => "",
+        }
+    }
+
     pub fn wants_text(&self) -> bool {
         matches!(self.view.popup, Some(Popup::SaveName(_))) || self.view.options.as_ref().is_some_and(|o| o.wants_text()) || self.kingdom_wants_text()
     }

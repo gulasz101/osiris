@@ -79,8 +79,9 @@ impl Growth {
 
 /// The Mission Editor's state as JSON for the smoke test, which cannot read the editor's
 /// fields from the page:
-/// `{"name":"Small Oasis","dirty":true,"path":null,"status":"Saved ...","tool":"paint"}`.
-pub fn editor_json(name: &str, dirty: bool, path: Option<&Path>, status: Option<&str>, tool: &str) -> String {
+/// `{"name":"Small Oasis","dirty":true,"path":null,"status":"Saved ...","popup":"save-name",
+/// "tool":"paint"}`.
+pub fn editor_json(name: &str, dirty: bool, path: Option<&Path>, status: Option<&str>, popup: &str, tool: &str) -> String {
     let path = match path {
         Some(p) => format!("\"{}\"", json_text(&p.to_string_lossy())),
         None => "null".to_owned(),
@@ -90,8 +91,9 @@ pub fn editor_json(name: &str, dirty: bool, path: Option<&Path>, status: Option<
         None => "null".to_owned(),
     };
     format!(
-        "{{\"name\":\"{}\",\"dirty\":{dirty},\"path\":{path},\"status\":{status},\"tool\":\"{}\"}}",
+        "{{\"name\":\"{}\",\"dirty\":{dirty},\"path\":{path},\"status\":{status},\"popup\":\"{}\",\"tool\":\"{}\"}}",
         json_text(name),
+        json_text(popup),
         json_text(tool)
     )
 }
@@ -194,8 +196,8 @@ mod tests {
     fn editor_json_reports_the_editor_state() {
         // Nothing picked yet: no path, no message, and the tool's own name.
         assert_eq!(
-            editor_json("Small Oasis", false, None, None, "none"),
-            r#"{"name":"Small Oasis","dirty":false,"path":null,"status":null,"tool":"none"}"#
+            editor_json("Small Oasis", false, None, None, "", "none"),
+            r#"{"name":"Small Oasis","dirty":false,"path":null,"status":null,"popup":"","tool":"none"}"#
         );
     }
 
@@ -213,10 +215,10 @@ mod tests {
         // A quote or a backslash in a name must not break the JSON the test parses, and a
         // saved path is a string, not `null`.
         let path = Path::new(r#"/user/maps/Soak "Edit".map"#);
-        let json = editor_json("Soak \"Edit\"", true, Some(path), Some("Saved /user/maps/Soak \"Edit\".map"), "paint");
+        let json = editor_json("Soak \"Edit\"", true, Some(path), Some("Saved /user/maps/Soak \"Edit\".map"), "save-name", "paint");
         assert_eq!(
             json,
-            r#"{"name":"Soak \"Edit\"","dirty":true,"path":"/user/maps/Soak \"Edit\".map","status":"Saved /user/maps/Soak \"Edit\".map","tool":"paint"}"#
+            r#"{"name":"Soak \"Edit\"","dirty":true,"path":"/user/maps/Soak \"Edit\".map","status":"Saved /user/maps/Soak \"Edit\".map","popup":"save-name","tool":"paint"}"#
         );
     }
 }

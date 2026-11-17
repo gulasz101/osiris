@@ -881,6 +881,9 @@ async function runSoakMission() {
     console.log("osiris web: soak run started at the fastest game speed");
 
     if (!(await soakWait(24, from, "the mission run"))) return;
+    // The FPS line comes every ten seconds of real time, and at the fastest speed the months
+    // can pass quicker than that: wait for one before reading the numbers.
+    await until(() => soakFps(from).length > 0, 25_000, 500);
     // The app's own lines: a month and its memory, and the fps every ten seconds.
     for (const message of consoleMessages.slice(from)) console.log(message);
     // A month can turn while the test is pressing Escape, so the run stops at 24.
@@ -932,6 +935,158 @@ async function runSoakMission() {
         "osiris web: custom map soak OK (" + mapNumbers.months + " months on Small Oasis, min fps " +
         mapNumbers.minFps + ", memory start " + mapNumbers.start + " MB end " + mapNumbers.end + " MB)"
     );
+
+    // ── Third run: the Mission Editor (design 8) ───────────────────────────
+    if (!(await leaveCity())) return;
+    if (!(await clickMenuTo("Go(Editor)", "editor"))) {
+        console.error("FAIL: the Mission Editor page never came up");
+        process.exitCode = 1;
+        return;
+    }
+    if (!(await clickMap("Small Oasis"))) return;
+    const editorFrom = consoleMessages.length;
+    await clickMenu("Choose(StartEdit)");
+    const opened = await until(
+        () => panicLine() !== null || consoleMessages.slice(editorFrom).some((m) => m.includes("osiris web: editor open ")),
+        120_000,
+        500
+    );
+    if (!opened) {
+        console.error("FAIL: the Mission Editor never opened Small Oasis");
+        process.exitCode = 1;
+        return;
+    }
+    if (!(await runEditorPaint())) return;
+    if (!(await runEditorSave())) return;
+    if (!(await runEditorExit())) return;
+    console.log("osiris web: editor OK (Small Oasis edited and saved as " + EDITED_PATH + ")");
+}
+
+/** The editor's own state, as `debug_editor()` returns it. */
+async function editorState() {
+    const state = await page.evaluate(() => (globalThis.debug_editor ? globalThis.debug_editor() : ""));
+    try {
+        return JSON.parse(state);
+    } catch {
+        return { name: null, dirty: null, path: null, status: null, tool: null, raw: state };
+    }
+}
+
+/**
+ * Picks the grass tool from the editor's palette and paints three tiles. `view.rs` lays the
+ * buttons out relative to the 186 pixel panel on the right (`WIDTH`) and `TOP` (24): the
+ * grass button is 13 in and 267 down, 39 by 26. A paint lands on the map only while a tool
+ * is held, and `debug_editor()`'s `dirty` and `tool` say whether it took.
+ */
+async function runEditorPaint() {
+    const size = await page.evaluate(() => {
+        const c = document.querySelector("canvas");
+        return c ? [c.width, c.height] : [1280, 768];
+    });
+    await clickGame(size[0] - 186 + 32, 24 + 280);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const picked = await editorState();
+    if (picked.tool !== "paint") {
+        console.error("FAIL: the grass button did not pick a tool, editor state " + JSON.stringify(picked));
+        process.exitCode = 1;
+        return false;
+    }
+    for (const [x, y] of [[600, 400], [640, 420], [680, 400]]) {
+        await clickGame(x, y);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    const painted = await editorState();
+    if (painted.dirty !== true) {
+        console.error("FAIL: painting three tiles left the map clean, editor state " + JSON.stringify(painted));
+        process.exitCode = 1;
+        return false;
+    }
+    console.log("osiris web: painted three tiles with the grass tool");
+    return true;
+}
+
+/** Whether the editor's status line says it saved the map. */
+async function editorSaved() {
+    const state = await editorState();
+    return typeof state.status === "string" && state.status.startsWith("Saved ");
+}
+
+/** Set by `runEditorSave()`: the path the test saved the edited map under. */
+let EDITED_PATH = "";
+
+/**
+ * File > Save, which asks for a name (`Popup::SaveName`) because the map came from the game's
+ * own `Maps/` and cannot be written back. The name box starts with the map's name, so the test
+ * erases it and types its own; Enter saves into `/user/maps`. The menu bar is the game's own
+ * (`top_menu.rs`): headers below y 30, the drop-down at 42 with 20 pixel entries, Save third.
+ */
+async function runEditorSave() {
+    await clickGame(20, 15);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await clickGame(60, 42 + 2 * 20 + 10);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    // A map can be missing an entry or exit point, and File > Save then asks "Save anyway?"
+    // first; its OK is the confirm popup's (popup.rs), so walk the OK's column like the city
+    // run does. `debug_editor()`'s `popup` says when the name box is up.
+    let state = await editorState();
+    for (let y = 341; y <= 421 && state.popup !== "save-name"; y += 10) {
+        await clickGame(673, y);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        state = await editorState();
+    }
+    if (state.popup !== "save-name") {
+        console.error("FAIL: File > Save did not ask for a name, editor state " + JSON.stringify(state));
+        process.exitCode = 1;
+        return false;
+    }
+    for (let i = 0; i < 12; i += 1) await page.keyboard.press("Backspace");
+    await page.keyboard.type("Soak Edit", { delay: 60 });
+    await page.keyboard.press("Enter");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    // The name box's OK button sits 256 in and 100 down from the popup's corner
+    // (`click_popup` in view.rs), which is the same OK the city popups use.
+    if (!(await editorSaved())) {
+        await clickGame(673, 341);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    const saved = await until(async () => {
+        const now = await editorState();
+        return typeof now.status === "string" && now.status.startsWith("Saved ");
+    }, 20_000, 500);
+    state = await editorState();
+    if (!saved || typeof state.path !== "string" || !state.path.startsWith("/user/maps/")) {
+        console.error("FAIL: the editor did not save the map under a new name, editor state " + JSON.stringify(state));
+        process.exitCode = 1;
+        return false;
+    }
+    EDITED_PATH = state.path;
+    console.log("osiris web: saved the edited map as " + EDITED_PATH);
+    return true;
+}
+
+/** File > Exit, which asks nothing while the map is saved, and the menu comes back. */
+async function runEditorExit() {
+    const from = consoleMessages.length;
+    await clickGame(20, 15);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await clickGame(60, 42 + 4 * 20 + 10);
+    const back = await until(
+        () => consoleMessages.slice(from).some((m) => m.includes("osiris web: page main") || m.includes("osiris web: page family")),
+        20_000,
+        250
+    );
+    if (!back) {
+        console.error("FAIL: the editor never went back to the menu, editor state " + JSON.stringify(await editorState()));
+        process.exitCode = 1;
+        return false;
+    }
+    if ((await panicLine()) !== null) {
+        console.error("FAIL: the page panicked in the editor run");
+        process.exitCode = 1;
+        return false;
+    }
+    console.log("osiris web: left the editor and the menu is back");
+    return true;
 }
 
 // The city's menu bar (`top_menu.rs`): `TopMenu::layout` starts the headers at x=10 and the

@@ -158,7 +158,8 @@ pub fn set_debug_editor(json: String) {
 }
 
 /// The Mission Editor's state as JSON, the way `main.rs` last built it:
-/// `{"name":"Small Oasis","dirty":true,"path":null,"status":"Saved ...","tool":"paint"}`.
+/// `{"name":"Small Oasis","dirty":true,"path":null,"status":"Saved ...","popup":"save-name",
+/// "tool":"paint"}`.
 #[wasm_bindgen]
 pub fn debug_editor() -> String {
     DEBUG_EDITOR.with(|cell| cell.borrow().clone())

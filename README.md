@@ -129,6 +129,9 @@ Adding `?mission=N` to the page's address starts mission `N` straight away, as
 The movies play in the page with their sound, the intro and the five periods' movies alike,
 and Escape skips one, as on the desktop.
 
+What the browser build can do today, how to run it and what is still missing:
+[`docs/STATUS.md`](docs/STATUS.md).
+
 ## Building
 
 With a recent stable Rust toolchain:

@@ -12,6 +12,14 @@ if (!BASE.startsWith("/") || !BASE.endsWith("/")) {
     process.exit(1);
 }
 const PORT = 8765;
+// `direct` starts mission 3 through `?mission=3` as soon as the files are mounted; `menu`
+// walks the main menu with real clicks. Empty (the default) keeps the old run.
+const MISSION_MODE = (process.env.SMOKE_MISSION ?? "").trim();
+if (!["", "direct", "menu"].includes(MISSION_MODE)) {
+    console.error("FAIL: SMOKE_MISSION must be empty, 'direct' or 'menu' (got " + MISSION_MODE + ")");
+    process.exit(1);
+}
+const DIRECT = MISSION_MODE === "direct";
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -110,6 +118,103 @@ function stageFiles(osirisData, relPaths) {
     }
 
     return stagingDir;
+}
+
+/** Wait until `predicate()` is true, or `ms` runs out. Returns whether it became true. */
+async function until(predicate, ms, step = 250) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+        if (predicate()) return true;
+        await new Promise((resolve) => setTimeout(resolve, step));
+    }
+    return predicate();
+}
+
+/** The distinct `osiris web: city month <n>` values in the console log, in order. */
+function monthsSeen() {
+    const months = [];
+    for (const message of consoleMessages) {
+        const hit = message.match(/osiris web: city month (\d+)/);
+        if (hit && !months.includes(hit[1])) months.push(hit[1]);
+    }
+    return months;
+}
+
+/** The first console line that looks like a wasm panic, or null. */
+function panicLine() {
+    return consoleMessages.find((message) => message.toLowerCase().includes("panicked")) ?? null;
+}
+
+/**
+ * SMOKE_MISSION=direct: the page was loaded with `?mission=3` and the game files are
+ * mounted, so start the game with the mission main.js read out of the URL and check
+ * the city really runs. Two different months prove the simulation advanced; the
+ * screenshot must be a real frame (a blank canvas compresses far below 50 000 bytes).
+ */
+async function runDirectMission() {
+    // main.js exposes the parsed value, so this also proves `?mission=3` reached the page.
+    const mission = await page.evaluate(() => globalThis.osirisMission);
+    if (mission !== 3) {
+        console.error("FAIL: ?mission=3 did not reach main.js (got " + mission + ")");
+        process.exitCode = 1;
+        return;
+    }
+
+    await page.evaluate((m) => start_game(m), mission);
+    const started = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: city 3 started")),
+        300_000,
+        500
+    );
+
+    // A mission opens its briefing and a message when it starts, and the game stops
+    // ticking while either is open. Escape closes whatever is up, as a player would, so
+    // press it now and then and let the city run. Months turn every 16 days of 51 ticks,
+    // so give it the same 300 s a menu load gets.
+    // Give the canvas the keyboard (a click focuses it, as winit's web canvas needs), then
+    // raise the game speed so months turn quickly.
+    if (started) {
+        await page.mouse.click(640, 384);
+        for (let i = 0; i < 6; i += 1) await page.keyboard.press("BracketRight");
+    }
+
+    let twoMonths = started;
+    let dismissed = 0;
+    const deadline = Date.now() + 300_000;
+    while (twoMonths && monthsSeen().length < 2 && Date.now() < deadline) {
+        if (panicLine() !== null) break;
+        await page.keyboard.press("Escape");
+        dismissed += 1;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    twoMonths = twoMonths && monthsSeen().length >= 2;
+    console.log("osiris web: pressed Escape " + dismissed + " times to close the mission's screens");
+
+    for (const message of consoleMessages) console.log(message);
+
+    // Give WebGL a moment to present the last frame before capturing it.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await page.screenshot({ path: "/tmp/osiris-web-city.png", fullPage: false });
+    const shot = fs.statSync("/tmp/osiris-web-city.png").size;
+    console.log("osiris web: screenshot written to /tmp/osiris-web-city.png (" + shot + " bytes)");
+
+    const panic = panicLine();
+    const months = monthsSeen();
+    if (panic) {
+        console.error("FATAL: wasm panic detected: " + panic);
+        process.exitCode = 1;
+    } else if (!started) {
+        console.error("FAIL: never saw 'osiris web: city 3 started'");
+        process.exitCode = 1;
+    } else if (!twoMonths || months.length < 2) {
+        console.error("FAIL: the city did not run two months (saw " + JSON.stringify(months) + ")");
+        process.exitCode = 1;
+    } else if (shot < 50_000) {
+        console.error("FAIL: the city screenshot is only " + shot + " bytes, likely blank");
+        process.exitCode = 1;
+    } else {
+        console.log("osiris web: city started and ran " + months.length + " months: " + months.join(", "));
+    }
 }
 
 async function run() {
@@ -417,6 +522,20 @@ async function run() {
             const relPaths = filterEssential(allPaths);
             console.log("osiris web: " + allPaths.length + " total files, mounting " + relPaths.length + " essential");
 
+            if (DIRECT) {
+                // Load the page the way the README does, so `?mission=3` is read by the
+                // page's own code rather than faked in the test.
+                consoleMessages.length = 0;
+                await page
+                    .goto(`http://localhost:${PORT}${BASE}?mission=3`, { waitUntil: "domcontentloaded", timeout: 30_000 })
+                    .catch(() => { /* polling for the ready line below */ });
+                if (!(await until(() => consoleMessages.some((m) => m.includes("osiris web: ready")), 30_000))) {
+                    console.error("FAIL: the page never got ready with ?mission=3");
+                    process.exitCode = 1;
+                    return;
+                }
+            }
+
             // Stage files on disk so the HTTP server can serve them.
             const stagingDir = stageFiles(osirisData, relPaths);
             console.log("osiris web: staged to " + stagingDir);
@@ -456,6 +575,11 @@ async function run() {
                     canvas.style.height = "768px";
                 }
             });
+
+            if (DIRECT) {
+                await runDirectMission();
+                return;
+            }
 
             // Start the game — returns a Promise on wasm.
             await page.evaluate(() => start_game());

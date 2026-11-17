@@ -36,6 +36,8 @@ globalThis.mount_exact = mount_exact;
 globalThis.mount_file = mount_file;
 globalThis.mount_user_file = mount_user_file;
 globalThis.start_game = start_game;
+// The number `?mission=` gave, so the smoke test can check the URL reached the game.
+globalThis.osirisMission = mission;
 
 try {
     await init();

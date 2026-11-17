@@ -1137,7 +1137,15 @@ impl App {
     fn quicksave(&mut self) {
         let Some(Screen::Playing(game, _)) = &self.screen else { return };
         let path = self.save_path(game);
-        let result = game.world.save().map_err(anyhow::Error::msg).and_then(|b| Ok(osiris_vfs::write(&path, b)?));
+        let result = game.world.save().map_err(anyhow::Error::msg).and_then(|b| {
+            // The smoke test waits for this line to know the save is in browser storage.
+            #[cfg(target_arch = "wasm32")]
+            let len = b.len();
+            osiris_vfs::write(&path, b)?;
+            #[cfg(target_arch = "wasm32")]
+            log::info!("osiris web: saved {} ({} bytes)", path.display(), len);
+            Ok(())
+        });
         let msg = match result {
             Ok(()) => trf("Saved {0}", &[&path.file_stem().unwrap_or_default().to_string_lossy()]),
             Err(e) => trf("Save failed: {0}", &[&e]),

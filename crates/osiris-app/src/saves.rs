@@ -68,6 +68,47 @@ fn is_save(path: &Path) -> bool {
         && !path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('_'))
 }
 
+/// The list as the JSON `list_saves` hands the page:
+/// `[{"family":"Smoke","name":"Nubt.osiris","path":"/user/families/smoke/saves/Nubt.osiris","size":184321}]`.
+///
+/// One string crosses the wasm boundary instead of a struct per row, and the page only needs
+/// these four strings and a number.
+pub fn json(entries: &[Entry]) -> String {
+    let rows: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            format!(
+                "{{\"family\":{},\"name\":{},\"path\":{},\"size\":{}}}",
+                quoted(&e.family),
+                quoted(&e.name),
+                quoted(&e.path),
+                e.size
+            )
+        })
+        .collect();
+    format!("[{}]", rows.join(","))
+}
+
+/// `s` as a JSON string. A family's name and a file's name are the player's own text, so
+/// quotes, backslashes and control characters are escaped rather than handed on as they are.
+fn quoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// The bytes of the save at `path`, which must be a save the list covers.
 pub fn read(user: &Path, path: &str) -> Result<Vec<u8>, String> {
     let path = checked_path(user, path)?;
@@ -183,6 +224,37 @@ mod tests {
         // The copy is in the list too, under the folder's own name (it has no name.txt).
         let families: Vec<String> = list(&user).into_iter().map(|e| e.family).collect();
         assert_eq!(families, ["Smoke", "other"]);
+
+        let _ = std::fs::remove_dir_all(&user);
+    }
+
+    #[test]
+    fn the_list_is_json_the_page_can_read() {
+        let user = temp("json");
+        let saves = user.join("families/smoke/saves");
+        osiris_vfs::create_dir_all(&saves).unwrap();
+        osiris_vfs::write(saves.join("Nubt.osiris"), b"save").unwrap();
+        osiris_vfs::write(user.join("families/smoke/name.txt"), "Smoke").unwrap();
+
+        let listed = json(&list(&user));
+        let path = saves.join("Nubt.osiris").to_string_lossy().into_owned();
+        assert_eq!(
+            listed,
+            format!("[{{\"family\":\"Smoke\",\"name\":\"Nubt.osiris\",\"path\":\"{path}\",\"size\":4}}]")
+        );
+        assert_eq!(json(&[]), "[]");
+
+        // A quote and a backslash in a name stay inside the JSON string.
+        let odd = Entry {
+            family: "a\"b".to_owned(),
+            name: "back\\slash.osiris".to_owned(),
+            path: "/user/saves/x.osiris".to_owned(),
+            size: 1,
+        };
+        assert_eq!(
+            json(&[odd]),
+            "[{\"family\":\"a\\\"b\",\"name\":\"back\\\\slash.osiris\",\"path\":\"/user/saves/x.osiris\",\"size\":1}]"
+        );
 
         let _ = std::fs::remove_dir_all(&user);
     }

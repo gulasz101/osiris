@@ -2,7 +2,7 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
 
 // ── How long the start took ────────────────────────────────────────
@@ -204,6 +204,53 @@ pub fn debug_read_user(name: String) -> Option<String> {
     osiris_vfs::read(&path)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+}
+
+// ── The Saves panel: list, read, write and delete under /user ──────
+
+/// Every saved game under `/user`, as JSON for the page's Saves panel:
+/// `[{"family":"Smoke","name":"Nubt.osiris","path":"/user/families/smoke/saves/Nubt.osiris","size":184321}]`.
+#[wasm_bindgen]
+pub fn list_saves() -> String {
+    crate::saves::json(&crate::saves::list(Path::new("/user")))
+}
+
+/// The bytes of one saved game, for the panel's Download button.
+///
+/// Refuses a path outside `/user/` and one that is not a save inside a saves folder.
+#[wasm_bindgen]
+pub fn read_save(path: String) -> Result<Vec<u8>, JsValue> {
+    let path = user_path(&path)?;
+    crate::saves::read(Path::new("/user"), path).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Writes `bytes` as `name` into the active family's saves folder, and returns the path written.
+///
+/// The write goes through `osiris_vfs`, so `init`'s `/user` change hook puts it in IndexedDB
+/// exactly as a save made by the game does: one write path, not a second one for imports.
+#[wasm_bindgen]
+pub fn write_save(name: String, bytes: Vec<u8>) -> Result<String, JsValue> {
+    let dir = crate::player_saves_dir();
+    let written = crate::saves::write(&dir, &name, &bytes).map_err(|e| JsValue::from_str(&e))?;
+    let path = written.to_string_lossy().into_owned();
+    user_path(&path)?;
+    Ok(path)
+}
+
+/// Removes one saved game, for the panel's Delete button.
+#[wasm_bindgen]
+pub fn delete_save(path: String) -> Result<(), JsValue> {
+    let path = user_path(&path)?;
+    crate::saves::delete(Path::new("/user"), path).map_err(|e| JsValue::from_str(&e))
+}
+
+/// `path` when it is under `/user/`, else the error the page shows.
+fn user_path(path: &str) -> Result<&str, JsValue> {
+    if path.starts_with("/user/") {
+        Ok(path)
+    } else {
+        Err(JsValue::from_str(&format!("{path} is not under /user/")))
+    }
 }
 
 /// The page canvas's bitmap size, as `main.js` `fitCanvas` left it: the window's size in

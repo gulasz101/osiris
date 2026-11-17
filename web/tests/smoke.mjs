@@ -19,8 +19,16 @@ if (!["", "direct", "menu"].includes(MISSION_MODE)) {
     console.error("FAIL: SMOKE_MISSION must be empty, 'direct' or 'menu' (got " + MISSION_MODE + ")");
     process.exit(1);
 }
+// `1` takes a saved game out of the browser and back: it starts the menu mission's city
+// (so it walks the menu as `SMOKE_MISSION=menu` does), saves it, and works the Saves panel.
+const SAVES_RAW = (process.env.SMOKE_SAVES ?? "").trim();
+const SAVES = SAVES_RAW === "1";
+if (SAVES_RAW !== "" && !SAVES) {
+    console.error("FAIL: SMOKE_SAVES must be 1 or unset (got " + SAVES_RAW + ")");
+    process.exit(1);
+}
 const DIRECT = MISSION_MODE === "direct";
-const MENU = MISSION_MODE === "menu";
+const MENU = MISSION_MODE === "menu" || SAVES;
 // `intro` plays the original's intro movie in the browser and skips it with Escape.
 const MOVIE_MODE = (process.env.SMOKE_MOVIE ?? "").trim();
 if (!["", "intro"].includes(MOVIE_MODE)) {
@@ -92,6 +100,10 @@ if (PICK_MODE && REMEMBER) {
 }
 // The game is started by the page itself in a wrapped, viewport or picker run.
 const PICK = WRAP !== "" || VIEWPORT !== null || PICK_MODE;
+if (SAVES && (DIRECT || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE)) {
+    console.error("FAIL: SMOKE_SAVES runs with no SMOKE_MISSION, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT or SMOKE_PICK");
+    process.exit(1);
+}
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -655,6 +667,170 @@ async function runMenuMission() {
     } else {
         console.log("osiris web: the menu started a city that ran " + months.length + " months: " + months.join(", "));
     }
+}
+
+// The city's menu bar (`top_menu.rs`): `TopMenu::layout` starts the headers at x=10 and the
+// bar is `sidebar::TOP` (30) pixels tall, so File sits at the very left. Its drop-down starts
+// at y=42 and each entry is 20 pixels tall, in `TopMenu::new`'s order: New game, Replay
+// mission, Load game, Save game. These are the game's own screen pixels; the smoke's canvas
+// is 1280x768 at a device pixel ratio of 1, so they are page pixels too.
+const FILE_HEADER = [20, 15];
+const FILE_LOAD = [60, 92];
+
+/** Click the canvas at game screen pixel `x`, `y`, the way the player's click arrives. */
+async function clickGame(x, y) {
+    const origin = await canvasOrigin();
+    await page.mouse.click(origin.left + x, origin.top + y);
+}
+
+/**
+ * SMOKE_SAVES=1: a saved game leaves the browser and comes back. The menu mission's city is
+ * running; F5 is the game's own quick save (winit's canvas keeps the browser's own F5 reload
+ * off while it has the keyboard). The panel's Download goes to Playwright's download folder
+ * and the file is compared with browser storage; the save is then deleted, imported again
+ * from that file, and loaded from the game's own Load Saved Game screen, which File > Load
+ * game opens. Prints `osiris web: saves export/import OK` when every step held.
+ */
+async function runSaves() {
+    const problems = [];
+    const fail = (message) => {
+        console.error("FAIL: " + message);
+        process.exitCode = 1;
+        problems.push(message);
+    };
+    const rowFor = (savePath) => '[data-path="' + savePath + '"]';
+    const listed = (savePath) =>
+        page.evaluate((p) => !!document.querySelector('[data-path="' + p + '"]'), savePath);
+    // The save's own bytes as browser storage holds them: -1 when it holds no such file. The
+    // game's writes reach IndexedDB through a hook, so flush them first (`osirisStore.idle`).
+    const storedSize = (savePath) =>
+        page.evaluate(async (p) => {
+            await globalThis.osirisStore.idle();
+            const pairs = await globalThis.osirisStore.loadAll();
+            const hit = pairs.find(([key]) => key === p);
+            return hit ? hit[1].length : -1;
+        }, savePath);
+    // The panel asks before it deletes a save, as it should; the smoke says yes.
+    page.on("dialog", (dialog) => dialog.accept());
+
+    // The menu mode starts the game through the wasm export, so the page's own `start()` never
+    // ran and the start screen is still over the city with the controls hidden. Give the page
+    // the state `start()` gives it, which is what the player sees, so the Saves button is there.
+    await page.evaluate(() => {
+        document.getElementById("start").hidden = true;
+        document.getElementById("start").style.display = "none";
+        document.getElementById("osiris").hidden = false;
+        document.getElementById("controls").hidden = false;
+    });
+
+    // 1. F5 saves the city, and `quicksave` logs the path and the size it wrote.
+    let from = consoleMessages.length;
+    await page.keyboard.press("F5");
+    await until(() => consoleMessages.slice(from).some((m) => m.includes("osiris web: saved ")), 30_000);
+    const savedLine = consoleMessages.slice(from).find((m) => m.includes("osiris web: saved "));
+    const saved = /osiris web: saved (.+) \((\d+) bytes\)/.exec(savedLine ?? "");
+    if (!saved) {
+        fail("F5 did not save the city (no 'osiris web: saved <path> (<n> bytes)')");
+        for (const m of consoleMessages.slice(from)) console.log(m);
+        return;
+    }
+    const savePath = saved[1];
+    const bytes = Number(saved[2]);
+    console.log("osiris web: F5 saved " + savePath + " (" + bytes + " bytes)");
+
+    // 2. The panel lists it: the family's name, the file's name, its size and its time.
+    await page.click("#saves-button");
+    await page.waitForSelector(rowFor(savePath), { timeout: 20_000 }).catch(() => {});
+    const row = await page.evaluate((p) => {
+        const tr = document.querySelector('[data-path="' + p + '"]');
+        return tr ? Array.from(tr.querySelectorAll("td")).map((td) => td.textContent) : null;
+    }, savePath);
+    if (!row) {
+        fail("the Saves panel never listed " + savePath);
+        return;
+    }
+    console.log("osiris web: the panel's row reads " + JSON.stringify(row));
+    if (row[0] !== "Smoke") fail("the row's family cell is " + JSON.stringify(row[0]) + ", not Smoke");
+    if (row[1] !== path.posix.basename(savePath)) fail("the row's file cell is " + JSON.stringify(row[1]));
+    if (row[2].trim() === "") fail("the row has no size");
+    if (!/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(row[3])) fail("the row has no date (" + JSON.stringify(row[3]) + ")");
+
+    // 3. Download it: the Blob and the `<a download>` link, straight into a folder on disk.
+    const downloadDir = "/tmp/osiris-saves";
+    fs.rmSync(downloadDir, { recursive: true, force: true });
+    fs.mkdirSync(downloadDir, { recursive: true });
+    let file = null;
+    try {
+        const waiting = page.waitForEvent("download", { timeout: 30_000 });
+        await page.click(rowFor(savePath) + " .save-download");
+        const download = await waiting;
+        file = path.join(downloadDir, download.suggestedFilename());
+        await download.saveAs(file);
+    } catch (err) {
+        fail("the panel's Download produced no file: " + err.message);
+        return;
+    }
+
+    // 4. The file, the game's own line and browser storage all agree on the size.
+    const inStore = await storedSize(savePath);
+    const fileSize = fs.statSync(file).size;
+    console.log(
+        "osiris web: " + path.basename(file) + " is " + fileSize + " bytes, the game wrote " + bytes +
+        ", browser storage holds " + inStore
+    );
+    if (path.basename(file) !== path.posix.basename(savePath)) fail("the download is named " + path.basename(file));
+    if (fileSize !== bytes) fail("the download is " + fileSize + " bytes, not the save's " + bytes);
+    if (inStore !== bytes) fail("browser storage holds " + inStore + " bytes, not " + bytes);
+
+    // 5. Delete it from the panel, and from browser storage with it.
+    await page.click(rowFor(savePath) + " .save-delete");
+    await page
+        .waitForFunction((p) => !document.querySelector('[data-path="' + p + '"]'), savePath, { timeout: 30_000 })
+        .catch(() => {});
+    const afterDelete = await storedSize(savePath);
+    const stillListed = await listed(savePath);
+    console.log("osiris web: after the delete the panel lists it: " + stillListed + ", storage holds " + afterDelete + " bytes");
+    if (stillListed) fail("the deleted save is still in the panel");
+    if (afterDelete !== -1) fail("the deleted save is still in browser storage (" + afterDelete + " bytes)");
+
+    // 6. Import the downloaded file again: the panel writes it through the game's own path.
+    await page.setInputFiles("#import", file);
+    await page
+        .waitForFunction((p) => !!document.querySelector('[data-path="' + p + '"]'), savePath, { timeout: 60_000 })
+        .catch(() => {});
+    const afterImport = await storedSize(savePath);
+    const status = await page.evaluate(() => document.getElementById("saves-status")?.textContent ?? "");
+    console.log("osiris web: after the import the panel says " + JSON.stringify(status) + ", storage holds " + afterImport + " bytes");
+    if (!(await listed(savePath))) fail("the imported save is not in the panel");
+    if (afterImport !== bytes) fail("the imported save is " + afterImport + " bytes, not " + bytes);
+
+    // 7. Load it from the game's own Load Saved Game screen: File > Load game.
+    await page.click("#saves-close");
+    from = consoleMessages.length;
+    await clickGame(FILE_HEADER[0], FILE_HEADER[1]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await clickGame(FILE_LOAD[0], FILE_LOAD[1]);
+    if (!(await waitPage("load", 30_000, from))) {
+        fail("File > Load game did not open the saved games page");
+        for (const m of consoleMessages.slice(from)) console.log(m);
+        return;
+    }
+    // A row picks the save and the picked row again loads it (`Menu::click_load`).
+    await clickMenu("Choose(Save");
+    await clickMenu("Choose(Save");
+    const loaded = await until(
+        () => consoleMessages.slice(from).some((m) => m.includes("osiris web: city 0 started")),
+        180_000,
+        500
+    );
+    if (!loaded) {
+        fail("the loaded save never started its city");
+        for (const m of consoleMessages.slice(from)) console.log(m);
+        return;
+    }
+    console.log("osiris web: the Load Saved Game screen loaded the imported save");
+
+    if (problems.length === 0) console.log("osiris web: saves export/import OK");
 }
 
 /** The PNG's width and height, read from the file's own header. */
@@ -1477,6 +1653,7 @@ async function run() {
 
             if (MENU) {
                 await runMenuMission();
+                if (SAVES && process.exitCode !== 1) await runSaves();
                 if (VIEWPORT && process.exitCode !== 1) await runViewportChecks();
                 return;
             }

@@ -25,4 +25,8 @@ fi
 if [ -n "${SMOKE_VIEWPORT:-}" ]; then
     TIMEOUT=900
 fi
+# A saves run starts a city from the menu, saves it, loads the save back and opens the panel.
+if [ -n "${SMOKE_SAVES:-}" ]; then
+    TIMEOUT=1200
+fi
 timeout "$TIMEOUT" node smoke.mjs

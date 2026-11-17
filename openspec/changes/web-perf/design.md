@@ -86,7 +86,47 @@ Unit test: three frames with known parts over one window give the right average 
   for the five paths with the most total ms. `smoke.mjs` prints both lines as they are.
 
 ## 4. The fix, picked by the numbers
-Write the first soak numbers here (task 1.3), then pick by the biggest part:
+
+### The first numbers (task 1.3)
+
+`OSIRIS_DATA=/Users/paperclip/PharaohData/Akhenaten/resources SMOKE_SOAK=1
+scripts/web-smoke.sh`, headless Chrome 1280x768, the city at the fastest speed, 24 months:
+
+```
+[l] osiris web: fps 6
+[l] osiris web: frame ms sim 6.2 render 5.3 io 4.0 other 145.8 (worst sim 20.3 render 9.1 io 7.5)
+osiris web: top reads /PharaohData/AUDIO/Ambient/MEADOW.MP3 36x 257.4 ms; /PharaohData/AUDIO/Wavs/FANFARE1.WAV 1x 4.4 ms
+osiris web: soak OK (24 months, min fps 6, memory start 245 MB end 245 MB)
+```
+
+The custom map run of the same soak, for comparison (6 months on Small Oasis):
+
+```
+[l] osiris web: fps 7
+[l] osiris web: frame ms sim 8.8 render 10.2 io 10.9 other 129.3 (worst sim 12.9 render 98.5 io 96.8)
+```
+
+**The biggest part is `other`: 145.8 of the about 161 ms a frame takes at 6 fps, nine tenths
+of the frame.** The three parts the app can see add up to 15.5 ms (sim 6.2, render 5.3, io
+4.0), so no part of our own code is the cost: the frame is spent after `redraw` returns.
+
+What that rules out, with the numbers:
+- **io is not the cost.** The whole 24 months did 37 lazy reads in 262 ms of total read time
+  (7 ms each), and `io` is 4.0 ms per frame; the 36 reads of `MEADOW.MP3` are the ambient
+  sound starting, not a per-frame read. `web-lazy`'s synchronous XHR is a small part.
+- **sim is not the cost.** 6.2 ms per frame, with the worst frame at 20.3 ms: the game rules
+  have room left.
+- **the render part our code does is not the cost.** 5.3 ms per frame is building and
+  submitting the frame (5.5 to 10.2 on the two runs), so the app is not stuck in `game.draw`.
+
+`other` is the frame length minus those three parts: the browser's own work between one
+`redraw` and the next. In a headless Chrome with no GPU that is the software rasteriser
+drawing the frame and the compositor presenting it, so the fix to look for next (task 1.4) is
+per-frame GPU work of ours that could be done once (a full tile map or texture upload every
+frame), and, if there is none, the measurement that shows the rest of `other` is the software
+GPU.
+
+Then pick by the biggest part:
 - **io biggest** (likely: `osiris-audio` opens a WAV through `osiris_vfs::open` each time a
   sound plays, and every open of a lazy entry is a full sync read). Fix in `osiris-vfs`
   `MemFs`: a small cache of lazy reads, keyed by original path, with a byte budget

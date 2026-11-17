@@ -1,7 +1,7 @@
 # web-movies Specification
 
 ## Purpose
-TBD - created by archiving change web-movies. Update Purpose after archive.
+Play the original's Bink movies in the browser: the intro and the five periods' movies, with sound, decoded a few frames at a time on the main thread, and skipped with Escape or a click as on the desktop.
 
 ## Requirements
 

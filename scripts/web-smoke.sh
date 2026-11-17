@@ -13,4 +13,8 @@ fi
 if [ -n "${SMOKE_MISSION:-}" ]; then
     TIMEOUT=600
 fi
+# A movie run mounts the whole install before the intro starts, as a mission run does.
+if [ -n "${SMOKE_MOVIE:-}" ]; then
+    TIMEOUT=600
+fi
 timeout "$TIMEOUT" node smoke.mjs

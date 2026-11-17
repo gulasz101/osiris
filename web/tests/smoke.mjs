@@ -21,6 +21,13 @@ if (!["", "direct", "menu"].includes(MISSION_MODE)) {
 }
 const DIRECT = MISSION_MODE === "direct";
 const MENU = MISSION_MODE === "menu";
+// `intro` plays the original's intro movie in the browser and skips it with Escape.
+const MOVIE_MODE = (process.env.SMOKE_MOVIE ?? "").trim();
+if (!["", "intro"].includes(MOVIE_MODE)) {
+    console.error("FAIL: SMOKE_MOVIE must be empty or 'intro' (got " + MOVIE_MODE + ")");
+    process.exit(1);
+}
+const INTRO = MOVIE_MODE === "intro";
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -389,6 +396,84 @@ async function runMenuMission() {
     }
 }
 
+/**
+ * SMOKE_MOVIE=intro: the original's intro plays in the browser. The browser decodes the
+ * movie's frames on the main thread a few at a time, so `frame 60` proves the decoder runs
+ * and that the pictures follow the sound's clock. Escape then skips to the menu, as a
+ * player would.
+ */
+async function runIntroMovie() {
+    const started = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: movie Intro_big started")),
+        90_000,
+        100
+    );
+    if (!started) {
+        console.error("FAIL: never saw 'osiris web: movie Intro_big started'");
+        for (const m of consoleMessages) console.log(m);
+        process.exitCode = 1;
+        return;
+    }
+    const startedAt = Date.now();
+
+    const frame60 = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: movie Intro_big frame 60")),
+        90_000,
+        100
+    );
+    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+    for (const m of consoleMessages) console.log(m);
+    if (!frame60) {
+        console.error("FAIL: the intro did not reach frame 60 within 90 s");
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: the intro reached frame 60 " + seconds + " s after it started");
+
+    // The picture the movie put on the screen, as a player sees it.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await page.screenshot({ path: "/tmp/osiris-web-movie.png", fullPage: false });
+    const shot = fs.statSync("/tmp/osiris-web-movie.png").size;
+    console.log("osiris web: screenshot written to /tmp/osiris-web-movie.png (" + shot + " bytes)");
+
+    // Escape skips the movie, as in the original (any key does).
+    const mark = consoleMessages.length;
+    await page.keyboard.press("Escape");
+    const done = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: movie Intro_big done")),
+        30_000,
+        100
+    );
+
+    // The menu logs `osiris web: page <name>` when it is built, which happens before the
+    // intro starts, so that line cannot show the hand-over. The menu answering with its
+    // buttons can: the movie screen draws none.
+    let buttons = [];
+    const menuDeadline = Date.now() + 30_000;
+    while (done && buttons.length === 0 && Date.now() < menuDeadline) {
+        buttons = await menuButtons();
+        if (buttons.length === 0) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    for (const m of consoleMessages.slice(mark)) console.log(m);
+
+    const panic = panicLine();
+    if (panic) {
+        console.error("FATAL: wasm panic detected: " + panic);
+        process.exitCode = 1;
+    } else if (!done) {
+        console.error("FAIL: Escape did not skip the intro (no 'osiris web: movie Intro_big done')");
+        process.exitCode = 1;
+    } else if (buttons.length === 0) {
+        console.error("FAIL: the menu never came up after the intro");
+        process.exitCode = 1;
+    } else if (shot < 50_000) {
+        console.error("FAIL: the movie screenshot is only " + shot + " bytes, likely blank");
+        process.exitCode = 1;
+    } else {
+        console.log("osiris web: the intro played, Escape skipped it, the menu is up (" + buttons.length + " buttons)");
+    }
+}
+
 async function run() {
     await new Promise((resolve) => server.listen(PORT, resolve));
 
@@ -688,6 +773,11 @@ async function run() {
         // Staging copies game files into the served folder, so it only works when we
         // serve web/ itself, never the published site.
         const osirisData = process.env.OSIRIS_DATA;
+        if (INTRO && !(osirisData && fs.existsSync(osirisData))) {
+            // The intro needs the install's BINKS/High/Intro_big.bik.
+            console.log("SKIP: no game data");
+            return;
+        }
         if (process.env.SMOKE_ROOT && osirisData && fs.existsSync(osirisData)) {
             console.log("SKIP: game data needs SMOKE_ROOT unset");
         } else if (osirisData && fs.existsSync(osirisData)) {
@@ -757,8 +847,20 @@ async function run() {
                 return;
             }
 
+            if (INTRO) {
+                // Give the canvas the keyboard (winit's web canvas takes keys when it is
+                // focused). This click is before the game starts, so it cannot skip the
+                // movie: a click does.
+                await page.mouse.click(640, 384);
+            }
+
             // Start the game — returns a Promise on wasm.
             await page.evaluate(() => start_game());
+
+            if (INTRO) {
+                await runIntroMovie();
+                return;
+            }
 
             if (MENU) {
                 await runMenuMission();

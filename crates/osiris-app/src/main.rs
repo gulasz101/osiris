@@ -689,6 +689,10 @@ impl App {
                 if let Some(a) = &self.audio {
                     a.stop_music();
                 }
+                // The browser shows its own cursor over the canvas, and winit's web
+                // backend panics here ("RefCell already borrowed") when a movie starts
+                // from inside an event.
+                #[cfg(not(target_arch = "wasm32"))]
                 if let Some(gfx) = &self.gfx {
                     gfx.window.set_cursor_visible(false);
                 }
@@ -712,6 +716,7 @@ impl App {
     fn end_movie(&mut self) {
         let Some(Screen::Movie(_, then)) = self.screen.take() else { return };
         self.screen = Some(*then);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(gfx) = &self.gfx {
             gfx.window.set_cursor_visible(true);
         }

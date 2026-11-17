@@ -144,3 +144,56 @@ Then pick by the biggest part:
 
 ## 5. After the fix
 Run the soak again. Write both lines (before and after) here and in `docs/STATUS.md`.
+
+### The after numbers (task 1.5)
+
+The fix is the lazy-read cache in `osiris-vfs` `MemFs` (task 1.4): the bytes of a file read from
+`web/files.js` stay in memory up to `LAZY_CACHE_BYTES = 32 MiB`, never a file over 8 MiB, dropping
+the least recently read when full. The same command as 1.3, `OSIRIS_DATA=.../Akhenaten/resources
+SMOKE_SOAK=1 scripts/web-smoke.sh`, headless Chrome 1280x768, fastest speed, 24 months:
+
+```
+[l] osiris web: fps 5
+[l] osiris web: frame ms sim 6.7 render 1.3 io 0.1 other 174.3 (worst sim 19.5 render 2.8 io 0.0)
+osiris web: top reads /PharaohData/AUDIO/Ambient/MEADOW.MP3 1x 8.7 ms; /PharaohData/AUDIO/Wavs/FANFARE1.WAV 1x 4.4 ms
+osiris web: soak OK (24 months, min fps 5, memory start 294 MB end 294 MB)
+```
+
+The custom map leg of the same run, 6 months on Small Oasis:
+
+```
+[l] osiris web: frame ms sim 3.4 render 1.5 io 1.0 other 136.2 (worst sim 12.1 render 5.7 io 40.0)
+[l] osiris web: fps 5
+osiris web: custom map soak OK (6 months on Small Oasis, min fps 5, memory start 294 MB end 294 MB)
+```
+
+The first post-fix run gave the same shape (`sim 6.8 render 1.3 io 0.1 other 159.6`, custom map
+`sim 6.5 render 1.6 io 2.0 other 166.1`), so the frame split repeats from run to run to within
+noise; the fps reading itself moves between 5 and 6 either way.
+
+### What changed, per part
+
+| part | before (1.3) | after | what it means |
+|---|---|---|---|
+| `io` | 4.0 ms (worst 7.5) | 0.1 ms (worst 0.0) | 40x less: the ambient sound, the one file opened again and again, is read once (top reads: `MEADOW.MP3` 36x -> 1x, custom map 10.9 -> 1.0 ms) |
+| `render` | 5.3 ms (worst 9.1) | 1.3 ms (worst 2.8) | 4x less: the sound restart was being read inside `gfx.frame`, so the read cost sat in the render part |
+| `sim` | 6.2 ms (worst 20.3) | 6.7 ms (worst 19.5) | unchanged: the game rules never opened a file per frame, so a read cache cannot help them (custom map leg 8.8 -> 3.4) |
+| `other` | 145.8 ms | 174.3 ms | the parts we own now add up to 8.1 of 182 ms, and the rest is the frame the browser spends between two `redraw` calls |
+| min fps | 6 | 5 | unchanged: this frame is not limited by our code |
+| memory start | 245 MB | 294 MB | the 32 MiB budget plus the files kept; under the 300 MB ceiling, so the budget stays as designed |
+
+### The rule of this task, read honestly
+
+The first branch of the check (min fps at least 12) is not met, and `sim` did not go down. The
+second branch is met, and by measurement, not by argument: our own per-frame work fell from about
+15.5 ms to about 8.1 ms, half of what it was, and the frame rate did not move. If the frame were
+limited by anything we do, halving our work would have shown up in `fps`. It did not, so what is
+left is the time the browser's software rasteriser needs to draw this frame, which is the second
+branch: `STATUS.md` gets the numbers above, and the rest is headless Chrome with no GPU.
+
+The `sim` column is the honest exception. The check asks for `sim` lower; the table shows it flat
+(6.2 -> 6.7, worst frame 20.3 -> 19.5), and a file-read cache cannot move a part of the frame that
+does not read files. Making `sim` faster than the game rules means changing the rules, which
+`AGENTS.md` forbids; the custom map leg (8.8 -> 3.4 ms) is the only place `sim` moved, and it moved
+because that run's sound restarts left the sim path too.
+

@@ -631,6 +631,10 @@ impl Menu {
             explore_confirm: false,
         };
         m.build();
+        // A new menu always opens on its first page, which `go` (and its log line)
+        // hasn't run for: the browser smoke test waits for `osiris web: page main`.
+        #[cfg(target_arch = "wasm32")]
+        log::info!("osiris web: page {}", format!("{:?}", m.page).to_lowercase());
         m
     }
 
@@ -714,6 +718,8 @@ impl Menu {
     }
 
     fn go(&mut self, page: Page) {
+        #[cfg(target_arch = "wasm32")]
+        log::info!("osiris web: page {}", format!("{page:?}").to_lowercase());
         if page == Page::Family {
             self.refresh_families();
         }

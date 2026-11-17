@@ -634,6 +634,10 @@ struct App {
     /// and calls [`finish_start`].
     #[cfg(target_arch = "wasm32")]
     pending: Rc<RefCell<Option<Result<(sidebar::SidebarImages, gfx::Gfx), anyhow::Error>>>>,
+    /// Browser-only: the month of the city on screen last frame, so the log gets one
+    /// line each time the month turns (`osiris web: city month <n>`, web-mission).
+    #[cfg(target_arch = "wasm32")]
+    web_month: Option<u32>,
 }
 
 impl App {
@@ -772,6 +776,10 @@ impl App {
     fn start(&mut self, mut world: World, mission: Option<usize>) {
         let (Some(gfx), Some(images)) = (self.gfx.as_mut(), self.images.clone()) else { return };
         world.rules = load_rules();
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web_month = Some(world.time.month);
+        }
         recording::start(&mut world);
         let briefing = review_view(&self.assets, &world, mission, None);
         let mut game = game::Game::new(world, images, self.assets.text.clone(), self.assets.messages.clone(), self.audio.clone());
@@ -784,6 +792,8 @@ impl App {
         self.autosaved = None;
         start_camera(&mut gfx.renderer, &mut game);
         self.screen = Some(Screen::Playing(Box::new(game), mission));
+        #[cfg(target_arch = "wasm32")]
+        log::info!("osiris web: city {} started", mission.map_or_else(|| "map".to_owned(), |m| m.to_string()));
     }
 
     /// `--replay` without `--screenshot`: the recorded game plays itself in the
@@ -1823,6 +1833,19 @@ impl App {
                     }
                 }
                 game.update(dt);
+                // One log line each time the month turns, for the browser smoke test.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let month = game.world.time.month;
+                    match self.web_month {
+                        Some(last) if last != month => {
+                            self.web_month = Some(month);
+                            log::info!("osiris web: city month {month}");
+                        }
+                        None => self.web_month = Some(month),
+                        _ => {}
+                    }
+                }
                 gfx.frame(|r| {
                     game.draw(r);
                     if let Some(s) = &status {
@@ -2438,6 +2461,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         editor_waiting: None,
         #[cfg(target_arch = "wasm32")]
         pending: Rc::new(RefCell::new(None)),
+        #[cfg(target_arch = "wasm32")]
+        web_month: None,
         // Replaced in `resumed`, once the window (and its monitor) exists.
         windowed_size: initial_size,
     };

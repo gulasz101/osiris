@@ -129,11 +129,11 @@ fn a_new_map_plays() {
     e.play().unwrap();
     let Some(Request::Play(path)) = e.request.take() else { panic!("no play request") };
     let scenario = Scenario::load_map(&path).unwrap();
-    std::fs::remove_dir_all(&maps).ok();
+    osiris_vfs::remove_dir_all(&maps).ok();
     assert_eq!(scenario.events.len(), 7);
     assert_eq!((scenario.info.entry_point.x, scenario.info.entry_point.y), entry);
 
-    let model = Model::parse(&String::from_utf8_lossy(&std::fs::read(data.join("Pharaoh_Model_Normal.txt")).unwrap())).unwrap();
+    let model = Model::parse(&String::from_utf8_lossy(&osiris_vfs::read(data.join("Pharaoh_Model_Normal.txt")).unwrap())).unwrap();
     let mut w = World::new(&scenario, e.defs.clone(), Arc::new(Balance::from_model(&model)));
     w.begin_at(osiris_sim::difficulty::NORMAL);
     w.start(&scenario);
@@ -235,7 +235,7 @@ fn every_event_type_fires_on_its_date() {
     let bytes = e.to_bytes().unwrap();
     let scenario = Scenario::from_chunks(&osiris_formats::ChunkFile::parse(&bytes, osiris_formats::Layout::Map).unwrap()).unwrap();
     assert_eq!(scenario.events.iter().map(|e| e.kind as usize).collect::<Vec<_>>(), kinds);
-    let model = Model::parse(&String::from_utf8_lossy(&std::fs::read(data.join("Pharaoh_Model_Normal.txt")).unwrap())).unwrap();
+    let model = Model::parse(&String::from_utf8_lossy(&osiris_vfs::read(data.join("Pharaoh_Model_Normal.txt")).unwrap())).unwrap();
     let mut w = World::new(&scenario, e.defs.clone(), Arc::new(Balance::from_model(&model)));
     w.begin_at(osiris_sim::difficulty::NORMAL);
     w.start(&scenario);

@@ -1,7 +1,9 @@
 # web-root Specification
 
 ## Purpose
-TBD - created by archiving change web-root. Update Purpose after archive.
+The player may pick their whole GOG folder, not only the folder that holds `Pharaoh.exe`.
+`web/folder.js` finds the game root inside whatever was picked, and only the files under that root
+are read and mounted under `/PharaohData`.
 
 ## Requirements
 

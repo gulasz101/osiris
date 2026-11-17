@@ -1,4 +1,5 @@
 import init, {
+    debug_editor,
     debug_menu_buttons,
     debug_write_user,
     debug_read_user,
@@ -9,6 +10,7 @@ import init, {
     mount_user_file,
     read_save,
     set_pick_time,
+    set_soak,
     start_game,
     write_save,
 } from "./pkg/osiris.js";
@@ -53,6 +55,8 @@ const missionInvalid = missionParam !== null && mission === undefined;
 
 // Expose wasm functions on window so the smoke test can call them via page.evaluate().
 globalThis.debug_menu_buttons = debug_menu_buttons;
+globalThis.debug_editor = debug_editor;
+globalThis.set_soak = set_soak;
 globalThis.debug_write_user = debug_write_user;
 globalThis.debug_read_user = debug_read_user;
 globalThis.mount_exact = mount_exact;

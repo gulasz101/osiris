@@ -1439,6 +1439,7 @@ impl Menu {
             }
             Page::Campaign | Page::Custom | Page::Editor => {
                 let frame = Frame::new(screen);
+                let (o, s) = (frame.o, frame.s);
                 let (top, up_y) = self.list_top();
                 let listed = (self.scroll..self.items.len())
                     .take(self.visible_rows())
@@ -1448,7 +1449,7 @@ impl Menu {
                 // The scroll arrows only move the list, so the test names them by what they
                 // do; they are the game's own buttons (design 5).
                 for (action, rect) in [("Scroll(-1)", [ARROW_X, up_y, ARROW_SIZE[0], ARROW_SIZE[1]]), ("Scroll(1)", [ARROW_X, ARROW_DOWN_Y, ARROW_SIZE[0], ARROW_SIZE[1]])] {
-                    let r = [frame.o[0] + rect[0] * frame.s, frame.o[1] + rect[1] * frame.s, rect[2] * frame.s, rect[3] * frame.s];
+                    let r = [o[0] + rect[0] * s, o[1] + rect[1] * s, rect[2] * s, rect[3] * s];
                     buttons.push((action.to_owned(), "scroll".to_owned(), r));
                 }
             }

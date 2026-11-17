@@ -27,8 +27,17 @@ if (SAVES_RAW !== "" && !SAVES) {
     console.error("FAIL: SMOKE_SAVES must be 1 or unset (got " + SAVES_RAW + ")");
     process.exit(1);
 }
+// `1` runs the soak change's three runs in one session: 24 months of mission 0 at the
+// fastest speed, 6 months of a custom map, and the Mission Editor saving an edit. The
+// numbers it records are in `design.md`.
+const SOAK_RAW = (process.env.SMOKE_SOAK ?? "").trim();
+const SOAK = SOAK_RAW === "1";
+if (SOAK_RAW !== "" && !SOAK) {
+    console.error("FAIL: SMOKE_SOAK must be 1 or unset (got " + SOAK_RAW + ")");
+    process.exit(1);
+}
 const DIRECT = MISSION_MODE === "direct";
-const MENU = MISSION_MODE === "menu" || SAVES;
+const MENU = MISSION_MODE === "menu" || SAVES || SOAK;
 // `intro` plays the original's intro movie in the browser and skips it with Escape.
 const MOVIE_MODE = (process.env.SMOKE_MOVIE ?? "").trim();
 if (!["", "intro"].includes(MOVIE_MODE)) {
@@ -562,15 +571,20 @@ async function skipIntro() {
  * family in the registry, goes to the campaign, picks the first mission and its briefing,
  * then lets the city run. Two different months prove the simulation advanced.
  */
-async function runMenuMission() {
+/**
+ * Walks the menu to a city: the intro, a new family named `family`, its family history,
+ * the first mission, its briefing, and the click that starts the city. `runMenuMission`
+ * and the soak run both begin here. A failure sets `process.exitCode` and returns false.
+ */
+async function enterFirstMission(family) {
     // The intro is the first screen of a fresh start, so it is in the way here too.
     await skipIntro();
     if (!checkMenuTime()) process.exitCode = 1;
-    const family = await waitPage("family", 60_000, 0);
-    if (!family) {
+    const registryPage = await waitPage("family", 60_000, 0);
+    if (!registryPage) {
         console.error("FAIL: the registry page never came up");
         process.exitCode = 1;
-        return;
+        return false;
     }
     const registry = await menuButtons();
     console.log("osiris web: the registry offers " + JSON.stringify(registry.slice(0, 2)));
@@ -580,19 +594,19 @@ async function runMenuMission() {
     if (!(await clickMenuTo("Go(NewFamily)", "newfamily", { ms: 30_000 }))) {
         console.error("FAIL: the new family page never came up");
         process.exitCode = 1;
-        return;
+        return false;
     }
     from = consoleMessages.length;
-    await page.keyboard.type("Smoke");
+    await page.keyboard.type(family);
     await page.keyboard.press("Enter");
     if (!(await waitPage("family", 60_000, from))) {
         console.error("FAIL: the registry never came back after naming the family");
         process.exitCode = 1;
-        return;
+        return false;
     }
 
     // The family's own file proves the typed name reached the game.
-    const made = await page.evaluate(() => debug_read_user("families/smoke/name.txt"));
+    const made = await page.evaluate((name) => debug_read_user("families/" + name + "/name.txt"), family.toLowerCase());
     console.log("osiris web: the family's name.txt reads " + JSON.stringify(made ?? null));
 
     // Pick the family just made and go on to its menu.
@@ -603,7 +617,7 @@ async function runMenuMission() {
         console.error("FAIL: the family's menu never came up after choosing it");
         for (const m of consoleMessages) console.log(m);
         process.exitCode = 1;
-        return;
+        return false;
     }
 
     // The family history's mission list. Explore History's tab opens it directly, which is
@@ -612,7 +626,7 @@ async function runMenuMission() {
         console.error("FAIL: the campaign's mission list never came up");
         for (const m of consoleMessages) console.log(m);
         process.exitCode = 1;
-        return;
+        return false;
     }
     // The campaign's first mission, and its briefing: a click on the row picks it and the
     // list's arrow starts it.
@@ -620,13 +634,18 @@ async function runMenuMission() {
     if (!(await clickMenuTo("Choose(StartMission)", "briefing", { ms: 60_000 }))) {
         console.error("FAIL: the briefing never came up");
         process.exitCode = 1;
-        return;
+        return false;
     }
 
     // On to the city. A mission opens messages when it starts, and the game stands still
     // while one is up, so press Escape now and then and let the city run.
     from = consoleMessages.length;
     await clickMenu("ToCity");
+    return true;
+}
+
+async function runMenuMission() {
+    if (!(await enterFirstMission("Smoke"))) return;
     let twoMonths = await until(() => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: city ")), 120_000, 500);
     if (twoMonths) {
         await page.mouse.click((await canvasOrigin()).left + 640, (await canvasOrigin()).top + 384);
@@ -667,6 +686,118 @@ async function runMenuMission() {
     } else {
         console.log("osiris web: the menu started a city that ran " + months.length + " months: " + months.join(", "));
     }
+}
+
+/**
+ * The soak run's own lines: `soak month <n> memory <bytes>` once a month, and the fps the
+ * app logs every ten seconds. `from` is a `consoleMessages` index, so a second city does
+ * not count the first one's months.
+ */
+function soakMonths(from = 0) {
+    const months = [];
+    for (const message of consoleMessages.slice(from)) {
+        const hit = message.match(/osiris web: soak month (\d+) memory (\d+)/);
+        if (hit) months.push({ month: Number(hit[1]), bytes: Number(hit[2]) });
+    }
+    return months;
+}
+
+function soakFps(from = 0) {
+    const rates = [];
+    for (const message of consoleMessages.slice(from)) {
+        const hit = message.match(/osiris web: fps (\d+)/);
+        if (hit) rates.push(Number(hit[1]));
+    }
+    return rates;
+}
+
+/** The ladder of speeds `]` walks in `game.rs`: eleven presses from the city's 70% reach it. */
+const SPEED_STEPS = 11;
+
+/**
+ * Waits for the soak run's months, pressing Escape so a message that opens does not stop
+ * the clock. Fails on a panic, on a month that takes more than the 60 s of the issue, and
+ * on the app's line that the memory grew every month for twelve months in a row.
+ */
+async function soakWait(wanted, from, label) {
+    let monthStart = Date.now();
+    let seen = 0;
+    let escapes = 0;
+    for (;;) {
+        const panic = panicLine();
+        if (panic) {
+            console.error("FATAL: wasm panic detected: " + panic);
+            process.exitCode = 1;
+            return false;
+        }
+        if (consoleMessages.slice(from).some((m) => m.includes("osiris web: soak memory grew every month"))) {
+            console.error("FAIL: " + label + " memory grew every month for twelve months in a row");
+            process.exitCode = 1;
+            return false;
+        }
+        const months = soakMonths(from).length;
+        if (months >= wanted) {
+            console.log("osiris web: " + label + " reached " + months + " months (" + escapes + " Escapes)");
+            return true;
+        }
+        if (months !== seen) {
+            seen = months;
+            monthStart = Date.now();
+        } else if (Date.now() - monthStart > 60_000) {
+            console.error("FAIL: " + label + " month " + (seen + 1) + " did not arrive within 60 s");
+            process.exitCode = 1;
+            return false;
+        }
+        await page.keyboard.press("Escape");
+        escapes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+}
+
+/** The soak run's numbers for one city, as the line the issue asks for. */
+function soakSummary(months, rates, label) {
+    if (months.length === 0) {
+        console.error("FAIL: " + label + " logged no month at all");
+        process.exitCode = 1;
+        return null;
+    }
+    if (rates.length === 0) {
+        console.error("FAIL: " + label + " logged no fps line");
+        process.exitCode = 1;
+        return null;
+    }
+    const start = Math.round(months[0].bytes / (1024 * 1024));
+    const end = Math.round(months[months.length - 1].bytes / (1024 * 1024));
+    return { months: months.length, minFps: Math.min(...rates), start, end };
+}
+
+/**
+ * SMOKE_SOAK=1: mission 0 from the menu at the fastest speed for 24 months, then the
+ * custom map and the editor runs (`design.md` 6 to 8).
+ */
+async function runSoakMission() {
+    if (!(await enterFirstMission("Soak"))) return;
+    // The city has to be running before the month lines have anything to say.
+    await page.evaluate(() => set_soak(true));
+    // A click gives the canvas the keyboard; the ladder's top is eleven `]` presses.
+    const origin = await canvasOrigin();
+    await page.mouse.click(origin.left + 640, origin.top + 384);
+    for (let i = 0; i < SPEED_STEPS; i += 1) await page.keyboard.press("BracketRight");
+    const from = consoleMessages.length;
+    console.log("osiris web: soak run started at the fastest game speed");
+
+    if (!(await soakWait(24, from, "the mission run"))) return;
+    // The app's own lines: a month and its memory, and the fps every ten seconds.
+    for (const message of consoleMessages.slice(from)) console.log(message);
+    // A month can turn while the test is pressing Escape, so the run stops at 24.
+    const months = soakMonths(from).slice(0, 24);
+    const rates = soakFps(from);
+    const numbers = soakSummary(months, rates, "the mission run");
+    if (!numbers) return;
+    console.log(
+        "osiris web: soak OK (" + numbers.months + " months, min fps " + numbers.minFps +
+        ", memory start " + numbers.start + " MB end " + numbers.end + " MB)"
+    );
 }
 
 // The city's menu bar (`top_menu.rs`): `TopMenu::layout` starts the headers at x=10 and the
@@ -1648,6 +1779,11 @@ async function run() {
 
             if (INTRO) {
                 await runIntroMovie();
+                return;
+            }
+
+            if (SOAK) {
+                await runSoakMission();
                 return;
             }
 

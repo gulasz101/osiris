@@ -29,4 +29,8 @@ fi
 if [ -n "${SMOKE_SAVES:-}" ]; then
     TIMEOUT=1200
 fi
+# A soak run plays 24 months of a city, then a custom map and the editor.
+if [ -n "${SMOKE_SOAK:-}" ]; then
+    TIMEOUT=1800
+fi
 timeout "$TIMEOUT" node smoke.mjs

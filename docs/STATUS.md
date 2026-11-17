@@ -95,6 +95,14 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   `osiris web: city started and ran 2 months: 1, 2`, and
   `OSIRIS_DATA=<folder> SMOKE_MISSION=menu scripts/web-smoke.sh` prints
   `osiris web: the menu started a city that ran 2 months: 1, 2`.
+- **The long run, the custom map and the Mission Editor.** The same city plays 24 game months at
+  the fastest speed while the page logs its frame rate every ten seconds and its wasm memory every
+  month, and a custom map from `Maps/` plays six; the Mission Editor opens `Small Oasis.map`, paints
+  tiles, saves it under a new name in `/user/maps` and goes back to the menu (`web-soak`).
+  `OSIRIS_DATA=<folder> SMOKE_SOAK=1 scripts/web-smoke.sh` prints
+  `osiris web: soak OK (24 months, min fps 7, memory start 931 MB end 931 MB)`,
+  `osiris web: custom map soak OK (6 months on Small Oasis, ...)` and
+  `osiris web: editor OK (Small Oasis edited and saved as /user/maps/Soak Edit.map)`.
 - **The movies play.** The intro and the periods' movies play in the page with their sound, and
   Escape skips one (`web-movies`).
   `OSIRIS_DATA=<folder> SMOKE_MOVIE=intro scripts/web-smoke.sh` prints
@@ -122,8 +130,6 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   that.
 - No threads. Autosaves and movie decoding run on the same thread as the game, so a movie may
   play less smoothly than on the desktop.
-- The Mission Editor and custom maps reachable from the menu have not been tried in the browser
-  yet, so treat them as untested rather than working.
 - The browser build is the same game rules and the same graphics, but slower than the desktop
   build, because wasm runs single-threaded and the first load reads a 13 MB wasm file.
 

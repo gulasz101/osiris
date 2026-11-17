@@ -161,9 +161,16 @@ Node with the existing `until()` helper and keeps the deadline in its own hands,
 anything inside the page that could wait forever.
 
 ## 10. The numbers
-Filled in by task 1.8 from the run this change passed with.
+Measured by task 1.8 with `OSIRIS_DATA=<folder> SMOKE_SOAK=1 scripts/web-smoke.sh`.
 
 | Run | Months | Min fps | Memory start | Memory end | Longest growing run |
 |---|---|---|---|---|---|
-| mission 0 (Nubt), 200x | 24 | - | - | - | - |
-| `Small Oasis.map`, 200x | 6 | - | - | - | - |
+| mission 0, fastest speed | 24 | 7 | 931 MB | 931 MB | none, the size never moved |
+| `Small Oasis.map`, fastest speed | 6 | 7 | 931 MB | 931 MB | none, the size never moved |
+
+The memory figure is `975765504` bytes (931 MB) at every one of the thirty months the two runs
+logged, so the growth rule had nothing to trip on and the run passed on its other two counts. The
+7 frames a second were measured over ten second windows in a headless Chromium that shared the
+machine with another build, so it is a floor from a busy machine, not a fast one. A desktop run
+of the same city is quicker, and the page has no threads: the game's own animation, the movie
+decoder and the autosaves all draw from the same frame budget.

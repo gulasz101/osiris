@@ -4,8 +4,6 @@
 //! A movie missing from the install (or one that won't open) is skipped without a
 //! word, and the player can turn movies off (Options > Sound).
 
-// Audio is only used in non-wasm code but needed for the function signature on all targets.
-#[cfg(not(target_arch = "wasm32"))]
 use osiris_audio::StreamSound;
 use osiris_audio::Audio;
 use osiris_render::{DynamicHandle, Renderer, Space};
@@ -111,14 +109,60 @@ pub struct Movie {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub struct Movie { pub done: bool }
+pub struct Movie {
+    width: u32,
+    height: u32,
+    /// The frame on screen, and whether it still needs uploading.
+    shown: Option<usize>,
+    picture: Vec<u8>,
+    dirty: bool,
+    handle: Option<DynamicHandle>,
+    sound: Option<StreamSound>,
+    /// When the movie started, the clock without sound.
+    start: Instant,
+    pub done: bool,
+}
 
 #[cfg(target_arch = "wasm32")]
 impl Movie {
-    pub fn skip(&mut self) {}
     pub fn update(&mut self) {}
     pub fn seek_blocking(&mut self, _seconds: f64) {}
-    pub fn draw(&mut self, _r: &mut Renderer) {}
+}
+
+impl Movie {
+    /// How far the movie has played: the sound's position when it is heard,
+    /// otherwise the time since it started.
+    fn clock(&self) -> Duration {
+        self.sound.as_ref().and_then(|s| s.position()).unwrap_or_else(|| self.start.elapsed())
+    }
+
+    pub fn skip(&mut self) {
+        self.done = true;
+    }
+
+    /// The picture's place on a screen: as large as fits, keeping its shape, centred.
+    pub fn fit(&self, screen: [f32; 2]) -> ([f32; 2], [f32; 2]) {
+        let (w, h) = (self.width as f32, self.height as f32);
+        let k = (screen[0] / w).min(screen[1] / h);
+        let size = [w * k, h * k];
+        ([((screen[0] - size[0]) / 2.0).round(), ((screen[1] - size[1]) / 2.0).round()], size)
+    }
+
+    pub fn draw(&mut self, r: &mut Renderer) {
+        r.rect([0.0, 0.0], r.screen, [0.0, 0.0, 0.0, 1.0], Space::Screen);
+        if self.shown.is_none() {
+            return;
+        }
+        if self.dirty || self.handle.is_none() {
+            self.handle = Some(r.upload_dynamic(TEXTURE_KEY, self.width, self.height, &self.picture));
+            self.dirty = false;
+        }
+        let Some(handle) = self.handle else { return };
+        let (pos, size) = self.fit(r.screen);
+        let smooth = std::mem::replace(&mut r.smooth, true);
+        r.dynamic_image(handle, pos, size, Space::Screen);
+        r.smooth = smooth;
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -178,12 +222,6 @@ impl Movie {
         }
     }
 
-    /// How far the movie has played: the sound's position when it is heard,
-    /// otherwise the time since it started.
-    fn clock(&self) -> Duration {
-        self.sound.as_ref().and_then(|s| s.position()).unwrap_or_else(|| self.start.elapsed())
-    }
-
     /// Takes the frames that are due by `t`, keeping the latest to show.
     fn advance_to(&mut self, t: Duration) {
         let due = (t.as_secs_f64() * self.fps) as usize;
@@ -233,33 +271,6 @@ impl Movie {
         }
     }
 
-    pub fn skip(&mut self) {
-        self.done = true;
-    }
-
-    /// The picture's place on a screen: as large as fits, keeping its shape, centred.
-    pub fn fit(&self, screen: [f32; 2]) -> ([f32; 2], [f32; 2]) {
-        let (w, h) = (self.width as f32, self.height as f32);
-        let k = (screen[0] / w).min(screen[1] / h);
-        let size = [w * k, h * k];
-        ([((screen[0] - size[0]) / 2.0).round(), ((screen[1] - size[1]) / 2.0).round()], size)
-    }
-
-    pub fn draw(&mut self, r: &mut Renderer) {
-        r.rect([0.0, 0.0], r.screen, [0.0, 0.0, 0.0, 1.0], Space::Screen);
-        if self.shown.is_none() {
-            return;
-        }
-        if self.dirty || self.handle.is_none() {
-            self.handle = Some(r.upload_dynamic(TEXTURE_KEY, self.width, self.height, &self.picture));
-            self.dirty = false;
-        }
-        let Some(handle) = self.handle else { return };
-        let (pos, size) = self.fit(r.screen);
-        let smooth = std::mem::replace(&mut r.smooth, true);
-        r.dynamic_image(handle, pos, size, Space::Screen);
-        r.smooth = smooth;
-    }
 }
 
 /// Whether a key press skips a movie: any key, as in the original (FUN_00413690),

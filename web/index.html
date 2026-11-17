@@ -15,6 +15,13 @@
         p { max-width: 40ch; opacity: 0.85; }
         #status { margin-top: 1em; color: #ffd700; min-height: 1.5em; }
         #start.drag { outline: 3px dashed #ffd700; }
+        /* Small, out of the way, and reachable while the game covers the page. */
+        #forget {
+            position: fixed; right: 0.75em; bottom: 0.75em; padding: 0.2em 0.6em;
+            font-size: 0.75rem; color: #ddd; background: rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 0.3em; cursor: pointer;
+        }
+        #forget:hover { color: #1a1a2e; background: #ffd700; }
     </style>
 </head>
 <body>
@@ -26,6 +33,7 @@
         <p>or drag the Pharaoh folder here</p>
         <p id="status"></p>
     </div>
+    <button id="forget" hidden>Forget game files</button>
     <script src="store.js"></script>
     <script src="audio.js"></script>
     <script type="module" src="main.js"></script>

@@ -8,6 +8,7 @@ import init, {
     start_game,
 } from "./pkg/osiris.js";
 import { filesFromDrop, filesFromInput, filesUnder, findGameRoot } from "./folder.js";
+import { forget as forgetGameFiles, restore as restoreGameFiles, save as saveGameFiles } from "./opfs.js";
 
 let busy = false;
 
@@ -21,6 +22,7 @@ const folderInput = document.getElementById("folder");
 const startDiv = document.getElementById("start");
 const canvas = document.getElementById("osiris");
 const status = document.getElementById("status");
+const forgetButton = document.getElementById("forget");
 
 // `?mission=N` starts that mission straight away, as `osiris --mission N` does on the
 // desktop. A value that is not a whole number is refused before the game starts.
@@ -65,6 +67,84 @@ try {
     console.warn("osiris web: persistence unavailable", err);
 }
 
+/**
+ * Show the canvas and start the game. The game files must be mounted already, either by
+ * `loadFolder` from the player's folder or from the copy in browser storage.
+ */
+function start() {
+    startDiv.style.display = "none";
+    canvas.hidden = false;
+    // Set explicit dimensions so winit's canvas window is not 1×1.
+    canvas.width = 1280;
+    canvas.height = 768;
+    canvas.style.width = "1280px";
+    canvas.style.height = "768px";
+    console.log("osiris web: set canvas to " + canvas.width + "x" + canvas.height);
+    status.textContent = "Starting game...";
+    start_game(mission);
+}
+
+/** Put the start screen back and say what went wrong, leaving the page usable. */
+function fail(err) {
+    console.error(err);
+    startDiv.style.display = "flex";
+    canvas.hidden = true;
+    status.textContent = "Error: " + (err && err.message ? err.message : err);
+}
+
+/** Offer the "Forget game files" button, which only makes sense once a copy exists. */
+function showForget() {
+    if (forgetButton) forgetButton.hidden = false;
+}
+
+// The game files the last load copied into browser storage: mount them and start, so the
+// player never sees the picker twice for the same install.
+let storedFiles = 0;
+if (!missionInvalid) {
+    try {
+        storedFiles = await restoreGameFiles((path, bytes) => mount_file(path, bytes));
+    } catch (err) {
+        console.warn("osiris web: reading the game files from browser storage failed", err);
+    }
+}
+if (storedFiles > 0) {
+    console.log("osiris web: game files restored from browser storage (" + storedFiles + " files)");
+    status.textContent = "Restored " + storedFiles + " game files from browser storage.";
+    try {
+        start();
+        showForget();
+    } catch (err) {
+        // A stored copy the game cannot use must never leave the player stuck on it.
+        console.warn("osiris web: the stored game files cannot start the game, forgetting them", err);
+        await forgetGameFiles();
+        startDiv.style.display = "flex";
+        canvas.hidden = true;
+        status.textContent =
+            "The game files kept in the browser cannot start the game. Choose your Pharaoh folder again.";
+    }
+}
+
+if (forgetButton) {
+    forgetButton.addEventListener("click", async () => {
+        forgetButton.disabled = true;
+        status.textContent = "Forgetting the game files...";
+        await forgetGameFiles();
+        location.reload();
+    });
+}
+
+/**
+ * Copy the picked game files into browser storage for the next load. Runs on its own
+ * after the game has started, so it never holds the start up, and never fails it.
+ */
+async function copyToStorage(files) {
+    try {
+        if ((await saveGameFiles(files)) > 0) showForget();
+    } catch (err) {
+        console.warn("osiris web: keeping the game files in browser storage failed", err);
+    }
+}
+
 async function loadFolder(list) {
     if (missionInvalid) {
         status.textContent = "mission must be a number";
@@ -100,21 +180,15 @@ async function loadFolder(list) {
     }
 
     try {
-        startDiv.style.display = "none";
-        canvas.hidden = false;
-        // Set explicit dimensions so winit's canvas window is not 1×1.
-        canvas.width = 1280;
-        canvas.height = 768;
-        canvas.style.width = "1280px";
-        canvas.style.height = "768px";
-        console.log("osiris web: set canvas to " + canvas.width + "x" + canvas.height);
-        status.textContent = "Starting game...";
-        start_game(mission);
+        start();
     } catch (err) {
-        console.error(err);
-        startDiv.style.display = "flex";
-        status.textContent = "Error: " + err.message;
+        fail(err);
+        return;
     }
+
+    // The game is running; keep these files for the next load. Not awaited: the copy runs
+    // file by file while the game draws, and its progress goes to the console.
+    copyToStorage(files);
 }
 
 // Drag-and-drop handlers on the start div.

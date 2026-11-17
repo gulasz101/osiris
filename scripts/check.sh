@@ -41,6 +41,9 @@ rm -rf "$tmp"
 echo "== folder test"
 node web/tests/folder-test.mjs
 
+echo "== fit test"
+node web/tests/fit-test.mjs
+
 echo "== opfs test"
 node web/tests/opfs-test.mjs
 

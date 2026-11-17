@@ -35,6 +35,10 @@ On the page, either click on the folder field and pick your Pharaoh install, or 
 folder onto the page. The page reads it in memory and the game starts. Nothing is uploaded and
 nothing leaves your computer; saves and settings are kept in the browser's own storage.
 
+Pick the folder that holds `Pharaoh.exe`, or any folder above it: the page looks for
+`Data/Pharaoh_General.sg3` at any depth, so your whole GOG folder (with the game down in
+`Akhenaten/resources/`) works as well as `resources/` itself.
+
 `?mission=N` in the address starts mission `N` straight away, the way `--mission N` does on the
 desktop. `?mission=0` is Nubt, the first mission.
 
@@ -105,5 +109,7 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 - `scripts/web-smoke.sh` builds the page and runs the browser smoke test. Its modes are the
   environment variables `OSIRIS_DATA` (game files), `SMOKE_MISSION=direct|menu`, `SMOKE_MOVIE=intro`,
   `SMOKE_ROOT` and `SMOKE_BASE` (serve another copy of the page, for example `out/site` under
-  `/osiris/`), and `SMOKE_TIMEOUT` (seconds, default 120).
+  `/osiris/`), and `SMOKE_TIMEOUT` (seconds, default 120). `SMOKE_WRAP=outer/inner` stages the game
+  files two folders deeper and loads them through the page's own folder picker, as a GOG install
+  sits; that run prints `osiris web: city started and ran 2 months: 1, 2`.
 - `scripts/no-game-files.sh` prints `no-game-files: OK` when no Pharaoh file is tracked in git.

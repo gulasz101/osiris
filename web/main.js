@@ -184,7 +184,7 @@ function showForget() {
 let storedFiles = 0;
 if (!missionInvalid) {
     try {
-        storedFiles = await restoreGameFiles((path, bytes) => mount_file(path, bytes));
+        storedFiles = await restoreGameFiles((path, bytes) => mount_file(path, bytes), progress);
     } catch (err) {
         console.warn("osiris web: reading the game files from browser storage failed", err);
     }

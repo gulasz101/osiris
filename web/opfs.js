@@ -5,6 +5,8 @@
 // helpers take a FileSystemDirectoryHandle, so web/tests/opfs-test.mjs can drive them
 // with an in-memory folder in Node.
 
+import { readAll } from "./progress.js";
+
 /** The folder under the OPFS root that holds the game files. */
 const GAME_DIR = "game";
 
@@ -70,29 +72,34 @@ export async function writeTree(dir, list, options = {}) {
 }
 
 /**
- * Read every file under `dir` and hand it to `onFile`, one at a time so only one file's
- * bytes are in memory. The marker file is left out.
+ * Read every file under `dir` and hand it to `onFile`, through the same `readAll` the
+ * folder picker uses, so the restore shows the same bar and reads a few files at once.
+ * The marker file is left out.
  *
  * @param {FileSystemDirectoryHandle} dir - the `game/` folder.
  * @param {(path: string, bytes: Uint8Array) => void} onFile
+ * @param {ReturnType<typeof import("./progress.js").createBar>|null} [bar] - the progress bar.
  * @returns {Promise<number>} how many files were read.
  */
-export async function readTree(dir, onFile) {
-    let count = 0;
+export async function readTree(dir, onFile, bar = null) {
+    const files = [];
     const walk = async (folder, prefix) => {
         for await (const [name, handle] of folder.entries()) {
             const path = prefix + name;
             if (handle.kind === "directory") {
                 await walk(handle, path + "/");
             } else if (path !== MARKER) {
-                const file = await handle.getFile();
-                onFile(path, new Uint8Array(await file.arrayBuffer()));
-                count += 1;
+                files.push({ path, handle });
             }
         }
     };
     await walk(dir, "");
-    return count;
+    return await readAll(
+        files,
+        (entry) => entry.handle.getFile().then((file) => file.arrayBuffer()),
+        (entry, bytes) => onFile(entry.path, new Uint8Array(bytes)),
+        bar
+    );
 }
 
 /**
@@ -207,21 +214,23 @@ export async function save(list) {
  * `start_game` looks for them.
  *
  * @param {(vfsPath: string, bytes: Uint8Array) => void} mount - `mount_file` from main.js.
+ * @param {ReturnType<typeof import("./progress.js").createBar>|null} [bar] - the progress bar.
  * @returns {Promise<number>} how many files were mounted, 0 when there is no complete copy.
  */
-export async function restore(mount) {
+export async function restore(mount, bar = null) {
     if (!available()) return 0;
     try {
         const root = await navigator.storage.getDirectory();
         const game = await root.getDirectoryHandle(GAME_DIR);
         if (!(await hasMarker(game))) return 0;
-        return await readTree(game, (path, bytes) => mount("PharaohData/" + path, bytes));
+        return await readTree(game, (path, bytes) => mount("PharaohData/" + path, bytes), bar);
     } catch (err) {
         // A first visit has no `game/` folder at all, which is not worth a warning.
         if (!(err && err.name === "NotFoundError")) {
             console.warn("osiris web: could not read the game files from browser storage: "
                 + (err && err.message ? err.message : err));
         }
+        if (bar) bar.hide();
         return 0;
     }
 }

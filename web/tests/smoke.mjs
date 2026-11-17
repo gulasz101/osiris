@@ -287,11 +287,42 @@ async function clickMenu(prefix, last = false) {
 }
 
 /**
+ * The intro plays before the main menu on a fresh start. A player skips it with Escape,
+ * so every later mode that expects the menu has to get past it first. Returns false when
+ * the intro never starts, which is fine: the menu is then simply already there.
+ */
+async function skipIntro() {
+    const seen = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: movie Intro_big started")),
+        30_000,
+        100
+    );
+    if (!seen) return false;
+    const mark = consoleMessages.length;
+    await page.keyboard.press("Escape");
+    const done = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: movie Intro_big done")),
+        30_000,
+        100
+    );
+    for (const m of consoleMessages.slice(mark)) console.log(m);
+    if (!done) {
+        console.error("FAIL: Escape did not skip the intro on the way to the menu");
+        process.exitCode = 1;
+    } else {
+        console.log("osiris web: Escape skipped the intro on the way to the menu");
+    }
+    return done;
+}
+
+/**
  * SMOKE_MISSION=menu: start a mission from the menu, the way the player does. Creates a
  * family in the registry, goes to the campaign, picks the first mission and its briefing,
  * then lets the city run. Two different months prove the simulation advanced.
  */
 async function runMenuMission() {
+    // The intro is the first screen of a fresh start, so it is in the way here too.
+    await skipIntro();
     const family = await waitPage("family", 60_000, 0);
     if (!family) {
         console.error("FAIL: the registry page never came up");
@@ -847,10 +878,11 @@ async function run() {
                 return;
             }
 
-            if (INTRO) {
+            if (INTRO || MENU) {
                 // Give the canvas the keyboard (winit's web canvas takes keys when it is
                 // focused). This click is before the game starts, so it cannot skip the
-                // movie: a click does.
+                // movie: a click does. The menu mode needs the keys too, because it
+                // presses Escape on the intro that plays before the menu.
                 await page.mouse.click(640, 384);
             }
 

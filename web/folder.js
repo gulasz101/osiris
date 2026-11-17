@@ -3,10 +3,70 @@
  * [{ path, file }] entries relative to the folder root.
  */
 
+/** Name that marks the game root, below the folder that holds `Data/`. */
+const GAME_FILE = "data/pharaoh_general.sg3";
+
+/** Separators to one "/", so a path from any walker compares the same way. */
+function normalisePath(path) {
+    return String(path).replace(/\\/g, "/");
+}
+
+/**
+ * Find the game root inside the paths the player chose: the shortest directory
+ * prefix `P` for which `P + "Data/Pharaoh_General.sg3"` is one of the paths.
+ *
+ * Names are compared case-insensitively, as the game's own files are spelled
+ * differently between installs. The prefix is returned with its trailing "/",
+ * or as `""` when the chosen folder itself holds `Data/`.
+ *
+ * @param {Array<{path: string, file: File|Blob}>} list
+ * @returns {string|null} the root prefix, or null when there is no Pharaoh folder.
+ */
+export function findGameRoot(list) {
+    let root = null;
+    for (const entry of list) {
+        const path = normalisePath(entry.path).toLowerCase();
+        if (!path.endsWith(GAME_FILE)) continue;
+        // "Data/Pharaoh_General.sg3" must start a path part, not end another one
+        // ("myData/..." is not the root's "Data/...").
+        const prefix = path.slice(0, path.length - GAME_FILE.length);
+        if (prefix !== "" && !prefix.endsWith("/")) continue;
+        const found = normalisePath(entry.path).slice(0, prefix.length);
+        if (root === null || found.length < root.length) {
+            root = found;
+        }
+    }
+    return root;
+}
+
+/**
+ * Keep only the entries under `root`, with the root prefix removed, so a file at
+ * `Akhenaten/resources/Data/x.sg3` comes out as `Data/x.sg3` when the root is
+ * `Akhenaten/resources/`. Entries outside the root (a zip, `extras/`, a Linux
+ * launcher) are dropped before anything is read.
+ *
+ * @param {string|null} root - as returned by findGameRoot ("" for the chosen folder).
+ * @param {Array<{path: string, file: File|Blob}>} list
+ * @returns {Array<{path: string, file: File|Blob}>}
+ */
+export function filesUnder(root, list) {
+    const out = [];
+    // No root found: the page refuses the folder, so no file is under it.
+    if (root === null || root === undefined) return out;
+    for (const entry of list) {
+        const path = normalisePath(entry.path);
+        if (root !== "") {
+            if (path.slice(0, root.length).toLowerCase() !== root.toLowerCase()) continue;
+        }
+        out.push({ path: path.slice(root.length), file: entry.file });
+    }
+    return out;
+}
+
 /**
  * Convert a FileList (from an <input type="file" webkitdirectory>) into
  * [{ path, file }], stripping the first path component from each entry so
- * that mount_file receives paths relative to the chosen folder.
+ * that the paths are relative to the folder the player chose.
  */
 export function filesFromInput(fileList) {
     const out = [];

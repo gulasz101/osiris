@@ -1439,12 +1439,18 @@ impl Menu {
             }
             Page::Campaign | Page::Custom | Page::Editor => {
                 let frame = Frame::new(screen);
-                let (top, _) = self.list_top();
+                let (top, up_y) = self.list_top();
                 let listed = (self.scroll..self.items.len())
                     .take(self.visible_rows())
                     .map(|i| ([LIST_X, top + 16.0 * (i - self.scroll) as f32, LIST_W, 16.0], i))
                     .collect();
                 rows(frame, listed);
+                // The scroll arrows only move the list, so the test names them by what they
+                // do; they are the game's own buttons (design 5).
+                for (action, rect) in [("Scroll(-1)", [ARROW_X, up_y, ARROW_SIZE[0], ARROW_SIZE[1]]), ("Scroll(1)", [ARROW_X, ARROW_DOWN_Y, ARROW_SIZE[0], ARROW_SIZE[1]])] {
+                    let r = [frame.o[0] + rect[0] * frame.s, frame.o[1] + rect[1] * frame.s, rect[2] * frame.s, rect[3] * frame.s];
+                    buttons.push((action.to_owned(), "scroll".to_owned(), r));
+                }
             }
             Page::Load | Page::Family => {
                 let frame = Self::main_frame(screen);
@@ -1470,8 +1476,11 @@ impl Menu {
             // arrow starts the picked period. Both are how a player reaches a mission.
             Page::HistoryPeriods => vec![(TAB_MISSIONS, "Go(Campaign)", "missions"), (EXIT_BUTTON, "Go(Main)", "exit")],
             Page::Periods => vec![(PLAY_BUTTON, "Go(Campaign)", "play")],
-            // The mission list's arrow starts the picked mission.
+            // The mission list's arrow starts the picked mission, and the two lists that go
+            // on to a city or the editor pick the row they play or edit.
             Page::Campaign => vec![(PLAY_BUTTON, "Choose(StartMission)", "play")],
+            Page::Custom => vec![(PLAY_BUTTON, "Choose(StartMap)", "play")],
+            Page::Editor => vec![(PLAY_BUTTON, "Choose(StartEdit)", "play")],
             _ => Vec::new(),
         };
         let frame = match self.page {

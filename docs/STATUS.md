@@ -85,6 +85,11 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   Escape skips one (`web-movies`).
   `OSIRIS_DATA=<folder> SMOKE_MOVIE=intro scripts/web-smoke.sh` prints
   `osiris web: the intro played, Escape skipped it, the menu is up (3 buttons)`.
+- **The canvas fills the window.** The picture is the browser window's size at the screen's
+  pixel ratio, and it follows the window, fullscreen and F11 (`web-fit`). Below 1024x768 the page
+  keeps that floor, and a corner link brings the page back over the running game.
+  `OSIRIS_DATA=<folder> SMOKE_MISSION=menu SMOKE_VIEWPORT=1920x1080 scripts/web-smoke.sh` prints
+  `osiris web: viewport OK (1920x1080 then 1280x720)`.
 - **The page is published.** `scripts/pages-site.sh` builds a static site in `out/site/` holding
   only the page and the wasm, and GitHub Pages serves it (`web-pages`). `sh scripts/pages-site.sh`
   prints `check-site: OK`, and `SMOKE_ROOT=$PWD/out/site SMOKE_BASE=/osiris/ node web/tests/smoke.mjs`

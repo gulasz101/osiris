@@ -103,9 +103,26 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   month, and a custom map from `Maps/` plays six; the Mission Editor opens `Small Oasis.map`, paints
   tiles, saves it under a new name in `/user/maps` and goes back to the menu (`web-soak`).
   `OSIRIS_DATA=<folder> SMOKE_SOAK=1 scripts/web-smoke.sh` prints
-  `osiris web: soak OK (24 months, min fps 6, memory start 245 MB end 245 MB)`,
+  `osiris web: soak OK (24 months, min fps 5, memory start 294 MB end 294 MB)`,
   `osiris web: custom map soak OK (6 months on Small Oasis, ...)` and
   `osiris web: editor OK (Small Oasis edited and saved as /user/maps/Soak Edit.map)`.
+- **Where the frame time goes, and what was cut.** The soak line now carries the frame split.
+  `sim`, `render` and `io` are the parts the program times itself (`game.update`, `gfx.frame` and
+  the file reads), and `other` is the rest of the frame, the time between two `redraw` calls
+  (`web-perf`). At the fastest speed in headless Chrome the biggest cost is **the browser's own
+  software rasteriser, not our code**:
+  - before: `fps 6`, `frame ms sim 6.2 render 5.3 io 4.0 other 145.8`, top reads
+    `MEADOW.MP3 36x 257.4 ms`
+  - after (a cache of the file reads in memory, up to 32 MiB): `fps 5`,
+    `frame ms sim 6.7 render 1.3 io 0.1 other 174.3`, top reads `MEADOW.MP3 1x 8.7 ms`
+
+  So `io` fell 40x and `render` 4x, our per-frame work went from about 15.5 ms to about 8 ms, and
+  the frame rate did not move: if the frame were limited by anything we do, halving our part would
+  have shown in `fps`. `sim` is flat (6.2 to 6.7 ms), because the game rules do not open a file per
+  frame, and making them faster would mean changing the rules. The headless browser has no GPU, so
+  the remaining ~150-175 ms a frame is its software drawing; on a machine with a GPU that part goes
+  away. The 32 MiB cache took the soak's memory start from 245 MB to 294 MB, still under the
+  300 MB the change allows.
 - **The movies play.** The intro and the periods' movies play in the page with their sound, and
   Escape skips one (`web-movies`).
   `OSIRIS_DATA=<folder> SMOKE_MOVIE=intro scripts/web-smoke.sh` prints
@@ -134,7 +151,9 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 - No threads. Autosaves and movie decoding run on the same thread as the game, so a movie may
   play less smoothly than on the desktop.
 - The browser build is the same game rules and the same graphics, but slower than the desktop
-  build, because wasm runs single-threaded and the first load reads a 13 MB wasm file.
+  build, because wasm runs single-threaded and the first load reads a 13 MB wasm file. In headless
+  Chrome the frame at the fastest speed is limited by the browser's software drawing, not by the
+  game: at 1280x768, our own per-frame work is about 8 ms of a frame that takes about 180 ms.
 
 ## 4. Checks
 

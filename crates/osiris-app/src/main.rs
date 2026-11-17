@@ -655,6 +655,10 @@ struct App {
     /// (web-soak).
     #[cfg(target_arch = "wasm32")]
     web_fps: Option<soak::Fps>,
+    /// Browser-only: the soak run's split of each frame into sim, render and io, `None` until
+    /// the city's first frame (web-perf).
+    #[cfg(target_arch = "wasm32")]
+    web_split: Option<soak::FrameSplit>,
     /// Browser-only: the soak run's one memory reading a month (web-soak).
     #[cfg(target_arch = "wasm32")]
     web_growth: Option<soak::Growth>,
@@ -1818,7 +1822,10 @@ impl App {
 
     fn redraw(&mut self) {
         let now = web_time::Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().min(0.1);
+        // The gap to the frame before, unclamped: the soak run's frame split needs the whole
+        // frame length, so the `other` part is not cut short the way `dt` is (web-perf).
+        let gap = now - self.last_frame;
+        let dt = gap.as_secs_f32().min(0.1);
         self.last_frame = now;
         // The soak run counts the game's own frames here, where the renderer is already
         // drawing (web-soak). A player's console stays quiet: nothing is counted unless
@@ -1905,7 +1912,16 @@ impl App {
                         }
                     }
                 }
+                // The soak run times the two parts of the frame it can see here, and takes
+                // the third (the page's file reads) from `web` (web-perf). Nothing is timed
+                // unless `SMOKE_SOAK=1` turned the lines on.
+                #[cfg(target_arch = "wasm32")]
+                let split_on = crate::web::soak();
+                #[cfg(target_arch = "wasm32")]
+                let sim_at = split_on.then(web_time::Instant::now);
                 game.update(dt);
+                #[cfg(target_arch = "wasm32")]
+                let sim_ms = sim_at.map_or(0.0, |at| at.elapsed().as_secs_f64() * 1000.0);
                 // One log line each time the month turns, for the browser smoke test.
                 #[cfg(target_arch = "wasm32")]
                 {
@@ -1939,12 +1955,32 @@ impl App {
                         _ => {}
                     }
                 }
+                #[cfg(target_arch = "wasm32")]
+                let render_at = split_on.then(web_time::Instant::now);
                 gfx.frame(|r| {
                     game.draw(r);
                     if let Some(s) = &status {
                         osiris_ui::draw_text(r, osiris_ui::Font::NormalYellow, s, 20.0, 50.0, osiris_ui::font::WHITE);
                     }
                 });
+                #[cfg(target_arch = "wasm32")]
+                if split_on {
+                    let part = soak::Part {
+                        sim: sim_ms,
+                        render: render_at.map_or(0.0, |at| at.elapsed().as_secs_f64() * 1000.0),
+                        io: crate::web::take_io_ms(),
+                    };
+                    let report = match &mut self.web_split {
+                        Some(split) => split.frame(now, part, gap.as_secs_f64() * 1000.0),
+                        None => {
+                            self.web_split = Some(soak::FrameSplit::new(now));
+                            None
+                        }
+                    };
+                    if let Some((average, worst, other)) = report {
+                        log::info!("osiris web: {}", soak::split_line(&average, &worst, other));
+                    }
+                }
                 if std::mem::take(&mut game.difficulty_changed) {
                     save_difficulty(game.world.difficulty);
                 }
@@ -2575,6 +2611,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         web_month: None,
         #[cfg(target_arch = "wasm32")]
         web_fps: None,
+        #[cfg(target_arch = "wasm32")]
+        web_split: None,
         #[cfg(target_arch = "wasm32")]
         web_growth: None,
         // Replaced in `resumed`, once the window (and its monitor) exists.

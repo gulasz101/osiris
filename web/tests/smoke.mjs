@@ -725,6 +725,50 @@ function soakFps(from = 0) {
     return rates;
 }
 
+/**
+ * The soak run's frame split, logged next to each fps line (web-perf):
+ * `osiris web: frame ms sim 1.2 render 130.4 io 0.3 other 35.1 (worst sim 9.0 render 210.0
+ * io 4.0)`. `render` is the CPU time of building and submitting the frame; the browser draws
+ * after that, and what it spends is `other`.
+ */
+function soakSplits(from = 0) {
+    const splits = [];
+    const line = /osiris web: frame ms sim ([\d.]+) render ([\d.]+) io ([\d.]+) other (-?[\d.]+) \(worst sim ([\d.]+) render ([\d.]+) io ([\d.]+)\)/;
+    for (const message of consoleMessages.slice(from)) {
+        const hit = message.match(line);
+        if (hit) {
+            splits.push({
+                sim: Number(hit[1]),
+                render: Number(hit[2]),
+                io: Number(hit[3]),
+                other: Number(hit[4]),
+                worstSim: Number(hit[5]),
+                worstRender: Number(hit[6]),
+                worstIo: Number(hit[7]),
+            });
+        }
+    }
+    return splits;
+}
+
+/**
+ * One frame split for the whole run: the mean of the windows' averages, and the worst frame
+ * of every window. The line reads the same as the app's own, so the two can be compared.
+ */
+function soakSplitSummary(splits) {
+    const mean = (pick) => splits.reduce((sum, split) => sum + pick(split), 0) / splits.length;
+    const worst = (pick) => Math.max(...splits.map(pick));
+    return (
+        "frame ms sim " + mean((s) => s.sim).toFixed(1) +
+        " render " + mean((s) => s.render).toFixed(1) +
+        " io " + mean((s) => s.io).toFixed(1) +
+        " other " + mean((s) => s.other).toFixed(1) +
+        " (worst sim " + worst((s) => s.worstSim).toFixed(1) +
+        " render " + worst((s) => s.worstRender).toFixed(1) +
+        " io " + worst((s) => s.worstIo).toFixed(1) + ")"
+    );
+}
+
 /** The ladder of speeds `]` walks in `game.rs`: eleven presses from the city's 70% reach it. */
 const SPEED_STEPS = 11;
 
@@ -898,6 +942,9 @@ async function runSoakMission() {
     // The FPS line comes every ten seconds of real time, and at the fastest speed the months
     // can pass quicker than that: wait for one before reading the numbers.
     await until(() => soakFps(from).length > 0, 25_000, 500);
+    // The frame split comes with each of those lines (web-perf). The run stops at 24 months,
+    // so a line can be one window short of the last month; the numbers are the same either way.
+    await until(() => soakSplits(from).length > 0, 25_000, 500);
     // The app's own lines: a month and its memory, and the fps every ten seconds.
     for (const message of consoleMessages.slice(from)) console.log(message);
     // A month can turn while the test is pressing Escape, so the run stops at 24.
@@ -905,6 +952,17 @@ async function runSoakMission() {
     const rates = soakFps(from);
     const numbers = soakSummary(months, rates, "the mission run");
     if (!numbers) return;
+    // Where the frame time went over the whole run, and the files the game read the slowest,
+    // so the soak line names the biggest cost (web-perf).
+    const splits = soakSplits(from);
+    if (splits.length === 0) {
+        console.error("FAIL: the mission run logged no frame split line");
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: " + soakSplitSummary(splits));
+    const top = await page.evaluate(() => debug_top_reads());
+    console.log("osiris web: top reads " + (top === "" ? "(no file read)" : top));
     console.log(
         "osiris web: soak OK (" + numbers.months + " months, min fps " + numbers.minFps +
         ", memory start " + numbers.start + " MB end " + numbers.end + " MB)"

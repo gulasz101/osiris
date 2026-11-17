@@ -45,6 +45,99 @@ impl Fps {
     }
 }
 
+/// The time one frame spent in each of the parts the browser build can see, in milliseconds.
+///
+/// `render` is the CPU time of building and submitting the frame, not the GPU's work: a
+/// browser build cannot ask for GPU timings (`wgpu`'s timestamp queries are native only), and
+/// the browser draws after the app returns. Whatever is left of the frame is [`FrameSplit`]'s
+/// `other`.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Part {
+    pub sim: f64,
+    pub render: f64,
+    pub io: f64,
+}
+
+impl Part {
+    /// The three parts added up: the frame time this split explains.
+    pub fn total(&self) -> f64 {
+        self.sim + self.render + self.io
+    }
+
+    /// Adds `other`'s parts to this one's.
+    fn add(&mut self, other: &Part) {
+        self.sim += other.sim;
+        self.render += other.render;
+        self.io += other.io;
+    }
+
+    /// This part divided by `frames`, so a sum over a window reads as one frame.
+    fn mean(&self, frames: f64) -> Part {
+        Part { sim: self.sim / frames, render: self.render / frames, io: self.io / frames }
+    }
+}
+
+/// Where a frame's time goes: the average of each part and of the whole frame over the same
+/// ten seconds as [`Fps`], and the worst frame of the window (the one that spent most in its
+/// three parts together).
+///
+/// The window is closed by the same rule as [`Fps`]: the frame at or past `FPS_EVERY` is the
+/// one that reports, so the two lines always describe the same frames.
+#[derive(Debug)]
+pub struct FrameSplit {
+    sums: Part,
+    frames: u32,
+    worst: Part,
+    worst_total: f64,
+    whole_ms: f64,
+    since: Instant,
+}
+
+impl FrameSplit {
+    pub fn new(now: Instant) -> Self {
+        Self { sums: Part::default(), frames: 0, worst: Part::default(), worst_total: 0.0, whole_ms: 0.0, since: now }
+    }
+
+    /// Adds one frame, drawn `whole_ms` after the frame before it, and returns the window's
+    /// (average, worst, average `other`) when `FPS_EVERY` has passed since it opened.
+    ///
+    /// `other` is the average frame length that is in none of the three parts: what the
+    /// browser spent between frames, the software GPU among it.
+    pub fn frame(&mut self, now: Instant, part: Part, whole_ms: f64) -> Option<(Part, Part, f64)> {
+        self.sums.add(&part);
+        self.whole_ms += whole_ms;
+        self.frames += 1;
+        if part.total() > self.worst_total {
+            self.worst = part;
+            self.worst_total = part.total();
+        }
+        let elapsed = now.saturating_duration_since(self.since);
+        if elapsed < FPS_EVERY {
+            return None;
+        }
+        let frames = self.frames as f64;
+        let average = self.sums.mean(frames);
+        let worst = self.worst;
+        let other = self.whole_ms / frames - average.total();
+        self.sums = Part::default();
+        self.frames = 0;
+        self.worst = Part::default();
+        self.worst_total = 0.0;
+        self.whole_ms = 0.0;
+        self.since = now;
+        Some((average, worst, other))
+    }
+}
+
+/// The soak run's frame-split line, one decimal throughout:
+/// `frame ms sim 1.2 render 130.4 io 0.3 other 35.1 (worst sim 9.0 render 210.0 io 4.0)`.
+pub fn split_line(average: &Part, worst: &Part, other: f64) -> String {
+    format!(
+        "frame ms sim {:.1} render {:.1} io {:.1} other {:.1} (worst sim {:.1} render {:.1} io {:.1})",
+        average.sim, average.render, average.io, other, worst.sim, worst.render, worst.io
+    )
+}
+
 /// The months whose wasm memory was larger than the month before.
 #[derive(Debug)]
 pub struct Growth {
@@ -163,6 +256,50 @@ mod tests {
         // The next window holds two frames in ten more seconds: two a second.
         assert_eq!(fps.frame(start + Duration::from_secs(11)), None);
         assert_eq!(fps.frame(start + Duration::from_secs(20)), Some(0.2));
+    }
+
+    #[test]
+    fn frame_split_averages_one_window_and_keeps_its_worst_frame() {
+        let start = Instant::now();
+        let mut split = FrameSplit::new(start);
+        // Three frames in ten seconds: sim 1, 2 and 3 ms, render 100 each, io 1 each, and
+        // whole frames of 200 ms each. The third is the worst of them.
+        let parts = [Part { sim: 1.0, render: 100.0, io: 1.0 }, Part { sim: 2.0, render: 100.0, io: 1.0 }, Part { sim: 3.0, render: 100.0, io: 1.0 }];
+        assert_eq!(split.frame(start + Duration::from_secs(1), parts[0], 200.0), None);
+        assert_eq!(split.frame(start + Duration::from_secs(2), parts[1], 200.0), None);
+        let (average, worst, other) = split.frame(start + Duration::from_secs(10), parts[2], 200.0).expect("the window closed at ten seconds");
+        // Averages: sim (1+2+3)/3, render 100, io 1. Other: a 200 ms frame with 103 in its parts.
+        assert!((average.sim - 2.0).abs() < 1e-9, "sim {}", average.sim);
+        assert!((average.render - 100.0).abs() < 1e-9, "render {}", average.render);
+        assert!((average.io - 1.0).abs() < 1e-9, "io {}", average.io);
+        assert!((other - 97.0).abs() < 1e-9, "other {other}");
+        assert_eq!(worst, parts[2], "the third frame spent the most in its parts");
+    }
+
+    #[test]
+    fn frame_split_starts_a_new_window_after_a_report() {
+        let start = Instant::now();
+        let mut split = FrameSplit::new(start);
+        let part = Part { sim: 5.0, render: 50.0, io: 0.0 };
+        assert_eq!(split.frame(start + Duration::from_secs(5), part, 100.0), None);
+        assert!(split.frame(start + Duration::from_secs(10), part, 100.0).is_some());
+        // The next window holds one frame of its own, so its worst is that frame and not
+        // the 50 ms render of the window before it.
+        let part = Part { sim: 7.0, render: 2.0, io: 0.0 };
+        let (average, worst, other) = split.frame(start + Duration::from_secs(20), part, 400.0).expect("the second window closed");
+        assert!((average.sim - 7.0).abs() < 1e-9, "sim {}", average.sim);
+        assert_eq!(worst, part, "the only frame of the window is its worst");
+        assert!((other - 391.0).abs() < 1e-9, "other {other}");
+    }
+
+    #[test]
+    fn split_line_names_every_part_to_one_decimal() {
+        let average = Part { sim: 1.25, render: 130.44, io: 0.34 };
+        let worst = Part { sim: 9.0, render: 210.0, io: 4.0 };
+        assert_eq!(
+            split_line(&average, &worst, 42.06),
+            "frame ms sim 1.2 render 130.4 io 0.3 other 42.1 (worst sim 9.0 render 210.0 io 4.0)"
+        );
     }
 
     #[test]

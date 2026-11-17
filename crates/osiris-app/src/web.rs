@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
 
@@ -195,13 +196,61 @@ extern "C" {
 /// file the game reads twice is read from the browser twice. A failed read is a warning
 /// and reads as a missing file.
 fn lazy_read(path: &str) -> Option<Vec<u8>> {
-    match files_read(path) {
+    // The soak run times the read and remembers the path, so the frame split can say how
+    // much of the frame the file reads cost and which files they were (web-perf). A
+    // player's console pays for none of it.
+    let timed = soak().then(web_time::Instant::now);
+    let result = files_read(path);
+    if let Some(start) = timed {
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        IO_MS.with(|cell| cell.set(cell.get() + ms));
+        READS.with(|reads| {
+            let mut reads = reads.borrow_mut();
+            let entry = reads.entry(path.to_owned()).or_insert((0, 0.0));
+            entry.0 += 1;
+            entry.1 += ms;
+        });
+    }
+    match result {
         Ok(bytes) => Some(bytes),
         Err(err) => {
             log::warn!("osiris web: reading {path} failed: {err:?}");
             None
         }
     }
+}
+
+thread_local! {
+    /// The milliseconds the lazy reads have taken since the frame split last took them.
+    static IO_MS: Cell<f64> = const { Cell::new(0.0) };
+
+    /// How many times each path has been read and how long those reads took, for the soak
+    /// run's `top reads` line (web-perf).
+    static READS: RefCell<HashMap<String, (u32, f64)>> = RefCell::new(HashMap::new());
+}
+
+/// The time of the lazy reads since the last call, in milliseconds, and zeroes the sum: the
+/// frame split calls this once a frame while the soak run is on.
+pub fn take_io_ms() -> f64 {
+    IO_MS.with(|cell| cell.replace(0.0))
+}
+
+/// The five paths whose lazy reads took the most time, for the soak run:
+/// `/PharaohData/Data/Sounds/x.wav 412x 830.4 ms; ...` (browser only, the smoke test reads it).
+#[wasm_bindgen]
+pub fn debug_top_reads() -> String {
+    let mut reads: Vec<(String, (u32, f64))> = READS.with(|reads| reads.borrow().iter().map(|(path, n)| (path.clone(), *n)).collect());
+    // Most total time first; a tie goes to the path read more often, then to the name, so the
+    // line is the same twice in a row.
+    reads.sort_by(|a, b| {
+        b.1.1.total_cmp(&a.1.1).then(b.1.0.cmp(&a.1.0)).then_with(|| a.0.cmp(&b.0))
+    });
+    reads
+        .iter()
+        .take(5)
+        .map(|(path, (count, ms))| format!("{path} {count}x {ms:.1} ms"))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// The change-callback used by the VFS hook.

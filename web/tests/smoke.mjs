@@ -28,6 +28,20 @@ if (!["", "intro"].includes(MOVIE_MODE)) {
     process.exit(1);
 }
 const INTRO = MOVIE_MODE === "intro";
+// `outer/inner` puts the game files two folders deeper inside the staged folder, as
+// Wojtek's GOG install does, and reads them through the page's own folder picker. That
+// proves the page finds the game root instead of assuming the chosen folder is it.
+const WRAP = (process.env.SMOKE_WRAP ?? "").trim().replace(/^\/+|\/+$/g, "");
+if (WRAP !== "" && !WRAP.split("/").every((part) => /^[A-Za-z0-9._-]+$/.test(part) && part !== "." && part !== "..")) {
+    console.error("FAIL: SMOKE_WRAP must be folder names separated by '/', like outer/inner (got " + WRAP + ")");
+    process.exit(1);
+}
+// The wrapped run starts the game from the page's own picker as soon as the files are
+// read, so the menu modes (which click and press keys before starting) do not apply.
+if (WRAP !== "" && (INTRO || MENU)) {
+    console.error("FAIL: SMOKE_WRAP runs with no SMOKE_MISSION or SMOKE_MISSION=direct");
+    process.exit(1);
+}
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -112,7 +126,7 @@ function filterEssential(paths) {
 }
 
 /** Copy essential files into a temp directory under WEB_DIR for HTTP serving. */
-function stageFiles(osirisData, relPaths) {
+function stageFiles(osirisData, relPaths, wrap = "") {
     const stagingDir = path.join(WEB_DIR, "game-data-staging");
     if (fs.existsSync(stagingDir)) {
         fs.rmSync(stagingDir, { recursive: true });
@@ -120,7 +134,7 @@ function stageFiles(osirisData, relPaths) {
 
     for (const rel of relPaths) {
         const src = path.join(osirisData, rel);
-        const dst = path.join(stagingDir, "PharaohData", rel);
+        const dst = path.join(stagingDir, wrap, "PharaohData", rel);
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         fs.copyFileSync(src, dst);
     }
@@ -172,7 +186,7 @@ function panicLine() {
  * the city really runs. Two different months prove the simulation advanced; the
  * screenshot must be a real frame (a blank canvas compresses far below 50 000 bytes).
  */
-async function runDirectMission() {
+async function runDirectMission({ alreadyStarted = false } = {}) {
     // main.js exposes the parsed value, so this also proves `?mission=3` reached the page.
     const mission = await page.evaluate(() => globalThis.osirisMission);
     if (mission !== 3) {
@@ -181,7 +195,11 @@ async function runDirectMission() {
         return;
     }
 
-    await page.evaluate((m) => start_game(m), mission);
+    // The wrapped run hands the folder to the page's picker, which starts the game
+    // itself; starting it a second time would run the program twice.
+    if (!alreadyStarted) {
+        await page.evaluate((m) => start_game(m), mission);
+    }
     const started = await until(
         () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: city 3 started")),
         300_000,
@@ -838,33 +856,89 @@ async function run() {
             }
 
             // Stage files on disk so the HTTP server can serve them.
-            const stagingDir = stageFiles(osirisData, relPaths);
+            const stagingDir = stageFiles(osirisData, relPaths, WRAP);
             console.log("osiris web: staged to " + stagingDir);
 
-            // Mount all game files by fetching from the test server and using mount_file.
-            // Use paths like "PharaohData/..." so mount_file creates /PharaohData/...
-            await page.evaluate(async ([paths, base]) => {
-                let count = 0;
-                for (const rel of paths) {
-                    const vfsPath = "PharaohData/" + rel;
-                    const resp = await fetch(base + "game-data-staging/PharaohData/" + rel);
-                    if (!resp.ok) {
-                        console.error("Failed to fetch " + rel + ": " + resp.status);
-                        continue;
-                    }
-                    const buf = new Uint8Array(await resp.arrayBuffer());
-                    mount_file(vfsPath, buf);
-                    count++;
-                    if (count % 50 === 0) {
-                        console.log("osiris web: mounted " + count + "/" + paths.length + " files");
-                    }
+            if (WRAP) {
+                // Give the page the whole staged folder, two folders above the game files,
+                // through its own picker: main.js has to find the root itself. A stray file
+                // next to the game folder must be skipped without being read.
+                fs.writeFileSync(path.join(stagingDir, WRAP, "stray.zip"), Buffer.from([0, 1, 2]));
+                await page.setInputFiles("#folder", stagingDir).catch((err) => {
+                    console.error("FAIL: could not give the picker " + stagingDir + ": " + err.message);
+                    process.exitCode = 1;
+                });
+                if (process.exitCode === 1) return;
+
+                const found = await until(
+                    () => consoleMessages.some((m) => m.includes("osiris web: game root '")),
+                    120_000,
+                    500
+                );
+                const rootLine = consoleMessages.find((m) => m.includes("osiris web: game root '"));
+                const reading = /reading (\d+) of (\d+) files/.exec(rootLine ?? "");
+                for (const m of consoleMessages) console.log(m);
+                if (!found || !rootLine) {
+                    console.error("FAIL: the page never found the game root in " + WRAP);
+                    process.exitCode = 1;
+                    return;
                 }
-            }, [relPaths, BASE]);
+                if (!reading || Number(reading[1]) !== relPaths.length || Number(reading[2]) !== relPaths.length + 1) {
+                    console.error("FAIL: the page did not skip the stray file (" + rootLine + ")");
+                    process.exitCode = 1;
+                    return;
+                }
+                console.log("osiris web: the page found the root under " + WRAP + " and skipped the stray file");
+
+                // The page is still reading those files (775 MB on this machine), so the
+                // staging folder has to stay on disk until it has read them all and
+                // started the game. Deleting it here made every later read fail, and the
+                // page then sat on an empty status line with nothing to show.
+                const readAll = await until(
+                    () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: set canvas to")),
+                    300_000,
+                    500
+                );
+                if (!readAll) {
+                    for (const m of consoleMessages) console.log(m);
+                    console.error(
+                        "FAIL: the page did not finish reading the game files under " + WRAP +
+                        " (status: " + ((await page.textContent("#status")) ?? "") + ")"
+                    );
+                    fs.rmSync(stagingDir, { recursive: true, force: true });
+                    process.exitCode = 1;
+                    return;
+                }
+            } else {
+                // Mount all game files by fetching from the test server and using mount_file.
+                // Use paths like "PharaohData/..." so mount_file creates /PharaohData/...
+                await page.evaluate(async ([paths, base]) => {
+                    let count = 0;
+                    for (const rel of paths) {
+                        const vfsPath = "PharaohData/" + rel;
+                        const resp = await fetch(base + "game-data-staging/PharaohData/" + rel);
+                        if (!resp.ok) {
+                            console.error("Failed to fetch " + rel + ": " + resp.status);
+                            continue;
+                        }
+                        const buf = new Uint8Array(await resp.arrayBuffer());
+                        mount_file(vfsPath, buf);
+                        count++;
+                        if (count % 50 === 0) {
+                            console.log("osiris web: mounted " + count + "/" + paths.length + " files");
+                        }
+                    }
+                }, [relPaths, BASE]);
+            }
 
             // Clean up staging directory.
             fs.rmSync(stagingDir, { recursive: true });
 
-            console.log("osiris web: all essential game files mounted, starting game...");
+            console.log(
+                WRAP
+                    ? "osiris web: the page read the game files from the folder picker, starting game..."
+                    : "osiris web: all essential game files mounted, starting game..."
+            );
 
             // Set canvas dimensions before starting the game (winit reads client_width/height).
             await page.evaluate(() => {
@@ -878,7 +952,7 @@ async function run() {
             });
 
             if (DIRECT) {
-                await runDirectMission();
+                await runDirectMission({ alreadyStarted: WRAP !== "" });
                 return;
             }
 

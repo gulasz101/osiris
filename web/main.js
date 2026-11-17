@@ -142,5 +142,13 @@ startDiv.addEventListener("drop", async e => {
 folderInput.addEventListener("change", async () => {
     const files = [...folderInput.files];
     if (files.length === 0) return;
-    await loadFolder(filesFromInput(folderInput.files));
+    try {
+        await loadFolder(filesFromInput(folderInput.files));
+    } catch (err) {
+        // A file the browser cannot read any more (the folder moved or was deleted while
+        // the page was reading it) must say so in the status line, not sit there silently.
+        console.error("osiris web: reading the chosen folder failed", err);
+        status.textContent = "Error: " + err.message;
+        startDiv.style.display = "flex";
+    }
 });

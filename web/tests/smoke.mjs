@@ -370,6 +370,29 @@ function gfxAdapter() {
 }
 
 /**
+ * Say which graphics backend and adapter the page drew with, once every run. The page logs
+ * it when the game's graphics start, so this waits for a flow to have started the game.
+ * With `SMOKE_GPU=1` a missing line and a software adapter both fail the run: the numbers
+ * of a software adapter say nothing about a player's machine (web-gpu-fps design 2).
+ */
+function reportGfx() {
+    const gfx = gfxAdapter();
+    if (gfx) console.log("osiris web: gfx backend " + gfx.backend + " adapter " + gfx.adapter);
+    if (!GPU) return;
+    if (!gfx) {
+        console.error("FAIL: GPU run logged no gfx adapter line");
+        process.exitCode = 1;
+        return;
+    }
+    if (/swiftshader|llvmpipe|software|microsoft basic/i.test(gfx.adapter)) {
+        console.error("FAIL: GPU run got a software adapter: " + gfx.adapter);
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: GPU run OK on " + gfx.adapter + " via " + gfx.backend);
+}
+
+/**
  * SMOKE_MISSION=direct: the page was loaded with `?mission=3` and the game files are
  * mounted, so start the game with the mission main.js read out of the URL and check
  * the city really runs. Two different months prove the simulation advanced; the
@@ -1768,25 +1791,6 @@ async function run() {
             if (r.startsWith("404")) console.log("REQUEST " + r);
         }
 
-        // Say once, in this run's own output, which graphics backend and adapter the page
-        // got: a software adapter explains a slow frame, and the GPU run fails on one.
-        const gfx = gfxAdapter();
-        if (gfx) console.log("osiris web: gfx backend " + gfx.backend + " adapter " + gfx.adapter);
-        else console.log("osiris web: the page logged no gfx adapter line");
-        if (GPU) {
-            if (!gfx) {
-                console.error("FAIL: GPU run logged no gfx adapter line");
-                process.exitCode = 1;
-                return;
-            }
-            if (/swiftshader|llvmpipe|software|microsoft basic/i.test(gfx.adapter)) {
-                console.error("FAIL: GPU run got a software adapter: " + gfx.adapter);
-                process.exitCode = 1;
-                return;
-            }
-            console.log("osiris web: GPU run OK on " + gfx.adapter + " via " + gfx.backend);
-        }
-
         if (!foundReady) {
             console.error("FAIL: never saw 'osiris web: ready'");
             process.exitCode = 1;
@@ -2359,6 +2363,9 @@ async function run() {
             }
         }
     } finally {
+        // Every flow starts the game, so the page's gfx line is here by now. A GPU run
+        // checks it before the browser goes away.
+        reportGfx();
         try {
             if (page) await page.close();
             if (browser) await browser.close();

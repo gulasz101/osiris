@@ -737,6 +737,7 @@ async function run() {
             console.error("FAIL: folder walk " + JSON.stringify(walkResult));
             process.exitCode = 1;
         } else if (process.exitCode !== 1) {
+            console.log("osiris web: folder walk OK");
             // ── Synthetic drop on #start ──────────────────────────────
             // Synthetic DataTransfer items have no file system entries, so this
             // exercises the fallback to dataTransfer.files and loadFolder.
@@ -752,19 +753,23 @@ async function run() {
                 }));
             });
 
-            let sawLoading = false;
+            // A lone x.txt is not a Pharaoh folder. The page must refuse it before it
+            // reads anything: the message in #status, #start still on screen, and no
+            // attempt to start the game (that would log the canvas and call start_game).
+            const sawRefusal = () =>
+                consoleMessages.slice(messageMark).some((m) =>
+                    m.includes("no Data/Pharaoh_General.sg3 among 1 files")
+                );
+            let sawRefusalLine = false;
             const dropDeadline = Date.now() + 15_000;
             while (Date.now() < dropDeadline) {
                 await new Promise((r) => setTimeout(r, 100));
-                if (consoleMessages.slice(messageMark).some((m) => m.includes("osiris web: loading 1 files"))) {
-                    sawLoading = true;
+                if (sawRefusal()) {
+                    sawRefusalLine = true;
                     break;
                 }
             }
 
-            // A lone x.txt is not a Pharaoh folder, so start_game must fail and
-            // put #start back on screen. start_game throws a JsValue string, so
-            // the readable message is the console error, not err.message.
             let dropState = { visible: false, status: "" };
             const stateDeadline = Date.now() + 15_000;
             while (Date.now() < stateDeadline) {
@@ -775,24 +780,23 @@ async function run() {
                         status: document.getElementById("status")?.textContent ?? "",
                     };
                 });
-                const failed = consoleMessages.slice(messageMark).some((m) =>
-                    m.includes("does not hold Pharaoh")
-                );
-                if (dropState.visible && failed) break;
+                if (dropState.visible && dropState.status.includes("does not hold Pharaoh")) break;
                 await new Promise((r) => setTimeout(r, 100));
             }
 
-            const sawFailure = consoleMessages.slice(messageMark).some((m) =>
-                m.includes("does not hold Pharaoh")
+            const sawFailure = dropState.status.includes("does not hold Pharaoh");
+            const started = consoleMessages.slice(messageMark).some((m) =>
+                m.includes("osiris web: set canvas")
             );
 
             for (const m of consoleMessages.slice(messageMark)) {
                 console.log(m);
             }
 
-            if (!sawLoading || !sawFailure || !dropState.visible) {
+            if (!sawRefusalLine || !sawFailure || !dropState.visible || started) {
                 console.error(
-                    "FAIL: folder drop " + JSON.stringify({ sawLoading, sawFailure, ...dropState })
+                    "FAIL: folder drop " +
+                        JSON.stringify({ sawRefusalLine, sawFailure, started, ...dropState })
                 );
                 process.exitCode = 1;
             } else {

@@ -7,9 +7,15 @@ import init, {
     mount_user_file,
     start_game,
 } from "./pkg/osiris.js";
-import { filesFromDrop, filesFromInput } from "./folder.js";
+import { filesFromDrop, filesFromInput, filesUnder, findGameRoot } from "./folder.js";
 
 let busy = false;
+
+// The refusal `start_game` gives for a folder without the game, so the page can say it
+// before it reads a single byte.
+const NO_DATA_MESSAGE =
+    "This folder does not hold Pharaoh's Data folder. Choose the folder that contains " +
+    "Pharaoh.exe (the GOG or Steam installation of Pharaoh + Cleopatra).";
 
 const folderInput = document.getElementById("folder");
 const startDiv = document.getElementById("start");
@@ -65,14 +71,31 @@ async function loadFolder(list) {
         return;
     }
 
-    console.log("osiris web: loading " + list.length + " files");
+    // The game root is wherever inside the chosen folder `Data/Pharaoh_General.sg3` is,
+    // so the player may pick the GOG folder or any folder above the game files.
+    const root = findGameRoot(list);
+    if (root === null) {
+        console.log(
+            "osiris web: no Data/Pharaoh_General.sg3 among " + list.length + " files, refusing the folder"
+        );
+        status.textContent = NO_DATA_MESSAGE;
+        return;
+    }
+    const files = filesUnder(root, list);
 
-    for (let i = 0; i < list.length; i++) {
-        const entry = list[i];
+    console.log(
+        "osiris web: game root '" + (root || "(the chosen folder)") + "', reading " +
+        files.length + " of " + list.length + " files"
+    );
+
+    // Everything under the root is mounted under /PharaohData, the folder `start_game`
+    // looks for, so the game does not care how deep the root sat in the chosen folder.
+    for (let i = 0; i < files.length; i++) {
+        const entry = files[i];
         const buf = await entry.file.arrayBuffer();
-        mount_file("/" + entry.path, new Uint8Array(buf));
-        if (i % 50 === 0 || i === list.length - 1) {
-            status.textContent = "Reading " + (i + 1) + " of " + list.length + " files...";
+        mount_file("PharaohData/" + entry.path, new Uint8Array(buf));
+        if (i % 50 === 0 || i === files.length - 1) {
+            status.textContent = "Reading " + (i + 1) + " of " + files.length + " files...";
         }
     }
 

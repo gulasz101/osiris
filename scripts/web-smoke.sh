@@ -21,4 +21,8 @@ fi
 if [ -n "${SMOKE_REMEMBER:-}" ]; then
     TIMEOUT=900
 fi
+# A viewport run reads the whole install through the page's picker and then runs a city.
+if [ -n "${SMOKE_VIEWPORT:-}" ]; then
+    TIMEOUT=900
+fi
 timeout "$TIMEOUT" node smoke.mjs

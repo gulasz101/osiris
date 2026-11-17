@@ -55,6 +55,30 @@ if (WRAP !== "" && (INTRO || MENU)) {
     console.error("FAIL: SMOKE_WRAP runs with no SMOKE_MISSION or SMOKE_MISSION=direct");
     process.exit(1);
 }
+// `1920x1080` opens the page in a window of that size and starts the game through the page's
+// own picker, so `main.js` is what sizes the canvas. The run then checks that the canvas is
+// the window, that the game resized its surface to it, that the city fills the frame, and
+// that a smaller window is filled too.
+const VIEWPORT_RAW = (process.env.SMOKE_VIEWPORT ?? "").trim();
+let VIEWPORT = null;
+if (VIEWPORT_RAW !== "") {
+    const match = /^(\d{2,5})x(\d{2,5})$/.exec(VIEWPORT_RAW);
+    if (!match) {
+        console.error("FAIL: SMOKE_VIEWPORT must be WIDTHxHEIGHT like 1920x1080 (got " + VIEWPORT_RAW + ")");
+        process.exit(1);
+    }
+    VIEWPORT = { width: Number(match[1]), height: Number(match[2]) };
+}
+if (VIEWPORT && !MENU) {
+    console.error("FAIL: SMOKE_VIEWPORT runs with SMOKE_MISSION=menu");
+    process.exit(1);
+}
+if (VIEWPORT && (INTRO || WRAP !== "" || REMEMBER)) {
+    console.error("FAIL: SMOKE_VIEWPORT runs on its own, with no SMOKE_MOVIE, SMOKE_WRAP or SMOKE_REMEMBER");
+    process.exit(1);
+}
+// The game is started by the page itself in a wrapped or viewport run, from the picker.
+const PICK = WRAP !== "" || VIEWPORT !== null;
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -449,8 +473,7 @@ async function runMenuMission() {
 
     // A new family, named by typing as a player would.
     let from = consoleMessages.length;
-    await clickMenu("Go(NewFamily)");
-    if (!(await waitPage("newfamily", 30_000, from))) {
+    if (!(await clickMenuTo("Go(NewFamily)", "newfamily", { ms: 30_000 }))) {
         console.error("FAIL: the new family page never came up");
         process.exitCode = 1;
         return;
@@ -540,6 +563,223 @@ async function runMenuMission() {
     } else {
         console.log("osiris web: the menu started a city that ran " + months.length + " months: " + months.join(", "));
     }
+}
+
+/** The PNG's width and height, read from the file's own header. */
+function pngSize(file) {
+    const head = fs.readFileSync(file).subarray(0, 24);
+    const signature = head.subarray(0, 8).toString("latin1");
+    if (signature !== "\x89PNG\r\n\x1a\n") return null;
+    return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+}
+
+/**
+ * SMOKE_VIEWPORT=WxH: the fit, end to end. The page started the game from its own picker, so
+ * `main.js` sized the canvas; the game has to have resized its surface to it, the city has to
+ * fill the frame with no black bar left over, and a smaller window has to be filled too.
+ */
+async function runViewportChecks() {
+    const problems = [];
+    const ratio = await page.evaluate(() => window.devicePixelRatio || 1);
+    const startPixels = { width: Math.floor(VIEWPORT.width * ratio), height: Math.floor(VIEWPORT.height * ratio) };
+    const startLine = "osiris web: set canvas to " + VIEWPORT.width + "x" + VIEWPORT.height;
+
+    if (!consoleMessages.some((m) => m.includes(startLine))) {
+        problems.push("the page never printed " + startLine);
+    } else {
+        console.log("osiris web: the page printed " + startLine);
+    }
+
+    // The canvas is the window: same CSS size, at the window's origin, nothing around it.
+    const fit = await page.evaluate(() => {
+        const canvas = document.getElementById("osiris");
+        const rect = canvas.getBoundingClientRect();
+        return {
+            inner: [window.innerWidth, window.innerHeight],
+            bitmap: [canvas.width, canvas.height],
+            css: [canvas.style.width, canvas.style.height],
+            rect: [rect.left, rect.top, rect.width, rect.height],
+            controls: !document.getElementById("controls").hidden,
+            startHidden: document.getElementById("start").hidden,
+        };
+    });
+    if (fit.inner[0] !== VIEWPORT.width || fit.inner[1] !== VIEWPORT.height) {
+        problems.push("the window is " + fit.inner.join("x") + ", not " + VIEWPORT_RAW);
+    }
+    if (fit.bitmap[0] !== startPixels.width || fit.bitmap[1] !== startPixels.height) {
+        problems.push("the canvas bitmap is " + fit.bitmap.join("x") + ", want " + startPixels.width + "x" + startPixels.height);
+    }
+    if (fit.rect[0] !== 0 || fit.rect[1] !== 0 || fit.rect[2] !== VIEWPORT.width || fit.rect[3] !== VIEWPORT.height) {
+        problems.push("the canvas does not fill the window (at " + fit.rect.join(",") + ")");
+    }
+    if (!fit.controls) problems.push("the corner controls are not on screen while the game runs");
+    if (!fit.startHidden) problems.push("the start page is still on screen while the game runs");
+
+    // The screenshot the mission run took must be the window, and no edge may be black.
+    const shotFile = "/tmp/osiris-web-city.png";
+    const size = fs.existsSync(shotFile) ? pngSize(shotFile) : null;
+    if (!size) {
+        problems.push("no readable city screenshot at " + shotFile);
+    } else if (size.width !== VIEWPORT.width || size.height !== VIEWPORT.height) {
+        problems.push("the screenshot is " + size.width + "x" + size.height + ", not " + VIEWPORT_RAW);
+    } else {
+        console.log("osiris web: the screenshot is " + size.width + "x" + size.height);
+    }
+
+    // Read the frame straight out of the canvas: how deep the black goes from each edge, and
+    // proof that the buffer holds a picture at all (a cleared buffer would look all black).
+    const border = await page.evaluate(() => {
+        const canvas = document.getElementById("osiris");
+        const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+        if (!gl) return { error: "the canvas has no WebGL context" };
+        const width = canvas.width;
+        const height = canvas.height;
+        const depth = 64;
+        const strip = (x, y, w, h) => {
+            const pixels = new Uint8Array(w * h * 4);
+            gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+            return { pixels, w };
+        };
+        const black = (s, i) => s.pixels[i] < 8 && s.pixels[i + 1] < 8 && s.pixels[i + 2] < 8;
+        const step = 16;
+        const left = strip(0, 0, depth, height);
+        const right = strip(width - depth, 0, depth, height);
+        const bottom = strip(0, 0, width, depth);
+        const top = strip(0, height - depth, width, depth);
+        const into = (strip, lines, at) => lines.map((line) => {
+            let d = 0;
+            while (d < depth && at(strip, line, d)) d += 1;
+            return d;
+        });
+        const ys = [];
+        for (let y = 0; y < height; y += step) ys.push(y);
+        const xs = [];
+        for (let x = 0; x < width; x += step) xs.push(x);
+        const sorted = (runs) => {
+            const copy = [...runs].sort((a, b) => a - b);
+            return copy[Math.floor(copy.length / 2)];
+        };
+        // A cleared drawing buffer would make every edge look black, so check a band of the
+        // middle of the frame for a picture.
+        const band = strip(0, Math.floor(height / 2) - 32, width, 64);
+        let lit = 0;
+        for (let i = 0; i < band.pixels.length; i += 4) {
+            if (band.pixels[i] > 8 || band.pixels[i + 1] > 8 || band.pixels[i + 2] > 8) lit += 1;
+        }
+        return {
+            width,
+            height,
+            left: sorted(into(left, ys, (s, y, d) => black(s, (y * s.w + d) * 4))),
+            right: sorted(into(right, ys, (s, y, d) => black(s, (y * s.w + (s.w - 1 - d)) * 4))),
+            bottom: sorted(into(bottom, xs, (s, x, d) => black(s, (d * s.w + x) * 4))),
+            top: sorted(into(top, xs, (s, x, d) => black(s, ((s.pixels.length / 4 / s.w - 1 - d) * s.w + x) * 4))),
+            lit,
+        };
+    });
+    if (border.error) {
+        problems.push(border.error);
+    } else if (border.lit === 0) {
+        problems.push("the canvas holds no picture (every pixel read back black)");
+    } else {
+        console.log(
+            "osiris web: black depth from each edge: left " + border.left + ", right " + border.right +
+            ", bottom " + border.bottom + ", top " + border.top + " px"
+        );
+        for (const [edge, value] of Object.entries({ left: border.left, right: border.right, bottom: border.bottom, top: border.top })) {
+            if (value > 8) problems.push("a black border " + value + " px wide on the " + edge + " edge");
+        }
+    }
+
+    // The button and F11 both ask the browser for full screen. Headless Chrome's own full
+    // screen is not worth depending on, so the request is recorded instead.
+    const askFullscreen = async (how) => page.evaluate((how) => {
+        const canvas = document.getElementById("osiris");
+        const real = canvas.requestFullscreen;
+        let asked = 0;
+        canvas.requestFullscreen = () => {
+            asked += 1;
+            return Promise.resolve();
+        };
+        if (how === "button") {
+            document.getElementById("fullscreen").click();
+        } else {
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "F11", bubbles: true }));
+        }
+        return new Promise((resolve) => setTimeout(() => {
+            canvas.requestFullscreen = real;
+            resolve(asked);
+        }, 200));
+    }, how);
+    const byButton = await askFullscreen("button");
+    if (byButton < 1) problems.push("the Fullscreen button did not ask for full screen");
+    const byKey = await askFullscreen("key");
+    if (byKey < 1) problems.push("F11 did not ask for full screen");
+
+    // The corner link brings the page back over the running game, and hides it again.
+    await page.click("#page");
+    const backOver = await page.evaluate(() => {
+        const start = document.getElementById("start");
+        return {
+            hidden: start.hidden,
+            shown: getComputedStyle(start).display !== "none",
+            over: start.classList.contains("over-game"),
+        };
+    });
+    if (backOver.hidden || !backOver.shown || !backOver.over) {
+        problems.push("the page link did not bring the start page back over the game");
+    }
+    await page.click("#page");
+    if (!(await page.evaluate(() => document.getElementById("start").hidden))) {
+        problems.push("the page link did not hide the start page again");
+    }
+
+    // A smaller window: the canvas follows it, and so does the surface.
+    const small = { width: 1280, height: 720 };
+    consoleMessages.length = 0;
+    await page.setViewportSize(small);
+    // The canvas's bitmap is its CSS size times the ratio the page sees at that moment,
+    // and the ratio is read again because a resized emulated window can report another.
+    const smallLine = "osiris web: set canvas to " + small.width + "x" + small.height;
+    if (!(await until(() => consoleMessages.some((m) => m.includes(smallLine)), 45_000, 200))) {
+        problems.push("the page never printed " + smallLine + " after the window got smaller");
+    } else {
+        // What the game did with it: it logs the surface size when a resize reaches it,
+        // and the canvas's own size proves the page refitted either way.
+        const surfaced = consoleMessages.find((m) => m.includes("osiris web: resize to"));
+        if (surfaced) console.log("osiris web: the game printed " + surfaced.trim());
+        const after = await page.evaluate(() => {
+            const canvas = document.getElementById("osiris");
+            const rect = canvas.getBoundingClientRect();
+            return {
+                bitmap: [canvas.width, canvas.height],
+                rect: [rect.width, rect.height],
+                css: [parseFloat(canvas.style.width), parseFloat(canvas.style.height)],
+            };
+        });
+        // The bitmap is the CSS size times the device pixel ratio. Which ratio the emulated
+        // window reports while it is being resized is the browser's business, so this only
+        // checks that the bitmap is the CSS size at a whole ratio.
+        const byX = after.bitmap[0] / after.css[0];
+        const byY = after.bitmap[1] / after.css[1];
+        if (after.css[0] !== small.width || after.css[1] !== small.height) {
+            problems.push("the canvas is styled " + after.css.join("x") + ", want " + small.width + "x" + small.height);
+        } else if (byX !== byY || !Number.isInteger(byX) || byX < 1 || byX > 4) {
+            problems.push("the canvas bitmap is " + after.bitmap.join("x") + " for a " + after.css.join("x") + " canvas");
+        }
+        if (after.rect[0] !== small.width || after.rect[1] !== small.height) {
+            problems.push("the canvas does not fill the smaller window (it is " + after.rect.join("x") + ")");
+        } else {
+            console.log("osiris web: the smaller window printed " + smallLine);
+        }
+    }
+
+    if (problems.length > 0) {
+        for (const problem of problems) console.error("FAIL: " + problem);
+        console.error("osiris web: viewport FAILED (" + VIEWPORT_RAW + ")");
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: viewport OK (" + VIEWPORT_RAW + " then 1280x720)");
 }
 
 /**
@@ -669,9 +909,25 @@ async function run() {
         // actually renders WebGL content. Without it, the canvas is blank.
         // --no-sandbox is needed when running as root in CI containers.
         browser = await chromium.launch({
-            args: ["--use-angle=gl", "--no-sandbox"],
+            // A viewport run also pins the device pixel ratio to 1: the canvas is sized from
+            // it, and a retina screen would otherwise double the bitmap under the run.
+            args: VIEWPORT
+                ? ["--use-angle=gl", "--no-sandbox", "--force-device-scale-factor=1"]
+                : ["--use-angle=gl", "--no-sandbox"],
         });
-        page = await browser.newPage();
+        // A viewport run pins the device pixel ratio to 1: the size the game reports back is
+        // the canvas bitmap, and a retina screen would otherwise turn 1920x1080 into
+        // 3840x2160 and read the menu's coordinates against the wrong scale. The maths at
+        // other ratios is `fit-test.mjs`'s job, not this run's.
+        if (VIEWPORT) {
+            const context = await browser.newContext({
+                viewport: { width: VIEWPORT.width, height: VIEWPORT.height },
+                deviceScaleFactor: 1,
+            });
+            page = await context.newPage();
+        } else {
+            page = await browser.newPage();
+        }
 
         page.on("console", (msg) => {
             const line = `[${msg.type().slice(0, 1)}] ${msg.text()}`;
@@ -685,6 +941,16 @@ async function run() {
             await page.goto(`http://localhost:${PORT}${BASE}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
         } catch {
             // Timeout is fine; we poll console messages below.
+        }
+
+        if (VIEWPORT) {
+            const ratio = await page.evaluate(() => window.devicePixelRatio);
+            console.log("osiris web: the page's device pixel ratio is " + ratio);
+            if (ratio !== 1) {
+                console.error("FAIL: the page's device pixel ratio is " + ratio + ", and this run wants 1");
+                process.exitCode = 1;
+                return;
+            }
         }
 
         // Wait up to 30 s for the ready message or a panic.
@@ -961,11 +1227,12 @@ async function run() {
                 return;
             }
 
-            if (WRAP) {
-                // Give the page the whole staged folder, two folders above the game files,
-                // through its own picker: main.js has to find the root itself. A stray file
-                // next to the game folder must be skipped without being read.
-                fs.writeFileSync(path.join(stagingDir, WRAP, "stray.zip"), Buffer.from([0, 1, 2]));
+            if (PICK) {
+                // Give the page the whole staged folder through its own picker, so `main.js`
+                // finds the game root and sizes the canvas itself. A wrapped run puts the game
+                // two folders above the game files and a stray file next to them, which must be
+                // skipped without being read.
+                if (WRAP) fs.writeFileSync(path.join(stagingDir, WRAP, "stray.zip"), Buffer.from([0, 1, 2]));
                 await page.setInputFiles("#folder", stagingDir).catch((err) => {
                     console.error("FAIL: could not give the picker " + stagingDir + ": " + err.message);
                     process.exitCode = 1;
@@ -981,16 +1248,21 @@ async function run() {
                 const reading = /reading (\d+) of (\d+) files/.exec(rootLine ?? "");
                 for (const m of consoleMessages) console.log(m);
                 if (!found || !rootLine) {
-                    console.error("FAIL: the page never found the game root in " + WRAP);
+                    console.error("FAIL: the page never found the game root in the chosen folder");
                     process.exitCode = 1;
                     return;
                 }
-                if (!reading || Number(reading[1]) !== relPaths.length || Number(reading[2]) !== relPaths.length + 1) {
-                    console.error("FAIL: the page did not skip the stray file (" + rootLine + ")");
+                const wanted = relPaths.length + (WRAP ? 1 : 0);
+                if (!reading || Number(reading[1]) !== relPaths.length || Number(reading[2]) !== wanted) {
+                    console.error("FAIL: the page did not read " + relPaths.length + " of " + wanted + " files (" + rootLine + ")");
                     process.exitCode = 1;
                     return;
                 }
-                console.log("osiris web: the page found the root under " + WRAP + " and skipped the stray file");
+                console.log(
+                    WRAP
+                        ? "osiris web: the page found the root under " + WRAP + " and skipped the stray file"
+                        : "osiris web: the page found the root and read all " + relPaths.length + " files"
+                );
 
                 // The page is still reading those files (775 MB on this machine), so the
                 // staging folder has to stay on disk until it has read them all and
@@ -1004,7 +1276,7 @@ async function run() {
                 if (!readAll) {
                     for (const m of consoleMessages) console.log(m);
                     console.error(
-                        "FAIL: the page did not finish reading the game files under " + WRAP +
+                        "FAIL: the page did not finish reading the game files" +
                         " (status: " + ((await page.textContent("#status")) ?? "") + ")"
                     );
                     fs.rmSync(stagingDir, { recursive: true, force: true });
@@ -1037,28 +1309,30 @@ async function run() {
             fs.rmSync(stagingDir, { recursive: true });
 
             console.log(
-                WRAP
+                PICK
                     ? "osiris web: the page read the game files from the folder picker, starting game..."
                     : "osiris web: all essential game files mounted, starting game..."
             );
 
-            // Set canvas dimensions before starting the game (winit reads client_width/height).
-            // The canvas starts hidden in the page and main.js shows it once the game starts;
-            // a run that starts the game itself has to show it too, or it keeps no layout and
-            // every menu click lands at its own coordinates on the page instead of the button.
-            await page.evaluate(() => {
-                const canvas = document.getElementById('osiris');
-                if (canvas) {
-                    canvas.hidden = false;
-                    canvas.width = 1280;
-                    canvas.height = 768;
-                    canvas.style.width = "1280px";
-                    canvas.style.height = "768px";
-                }
-            });
+            if (!PICK) {
+                // Set canvas dimensions before starting the game. The canvas starts hidden in
+                // the page and main.js shows it once the game starts; a run that starts the
+                // game itself has to show it too, or it keeps no layout and every menu click
+                // lands at its own coordinates on the page instead of the button.
+                await page.evaluate(() => {
+                    const canvas = document.getElementById('osiris');
+                    if (canvas) {
+                        canvas.hidden = false;
+                        canvas.width = 1280;
+                        canvas.height = 768;
+                        canvas.style.width = "1280px";
+                        canvas.style.height = "768px";
+                    }
+                });
+            }
 
             if (DIRECT) {
-                await runDirectMission({ alreadyStarted: WRAP !== "" });
+                await runDirectMission({ alreadyStarted: PICK });
                 return;
             }
 
@@ -1070,10 +1344,10 @@ async function run() {
                 await page.mouse.click(640, 384);
             }
 
-            // Start the game — returns a Promise on wasm. A wrapped run hands the folder to
-            // the page's picker, and the page has already started the game itself by now:
-            // starting it twice throws "EventLoop can't be recreated".
-            if (!WRAP) {
+            // Start the game — returns a Promise on wasm. A run that handed the folder to the
+            // page's picker has already started the game that way: starting it twice throws
+            // "EventLoop can't be recreated".
+            if (!PICK) {
                 await page.evaluate(() => start_game());
             }
 
@@ -1084,6 +1358,7 @@ async function run() {
 
             if (MENU) {
                 await runMenuMission();
+                if (VIEWPORT && process.exitCode !== 1) await runViewportChecks();
                 return;
             }
 

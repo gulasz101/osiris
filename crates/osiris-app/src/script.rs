@@ -79,6 +79,8 @@ pub struct ScriptView {
     pub keys: Vec<String>,
     /// A movie to show instead, and how many seconds into it.
     pub movie: Option<(String, f64)>,
+    /// Player input given once the city is drawn (`ui ...`; see ui_steps.rs).
+    pub ui: Vec<crate::ui_steps::UiStep>,
 }
 
 /// Runs `--script` steps against the world.
@@ -218,6 +220,11 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
             ["sidebar", "expand"] => crate::sidebar::set_collapsed(false),
             ["sidebar", "slide", dir, step] => view.slide = Some((*dir == "collapse", step.parse()?)),
             ["key", name] => view.keys.push(name.to_string()),
+            // Player input through the game's own handlers, once the city is drawn:
+            // ui tile X,Y | inspect X,Y | ship S | shipinfo S (an id, warship or transport) | button N | back |
+            // key K | ticks N | overseer NAME | armynavy | navyrow R go|back|service |
+            // dispatch | report.
+            ["ui", rest @ ..] => view.ui.push(crate::ui_steps::parse(rest)?),
             ["hover", p] => {
                 let (x, y) = parse_point(p)?;
                 view.hover = Some([x as f32, y as f32]);
@@ -653,6 +660,15 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
                     f.damage = n.parse()?;
                 }
             }
+            // Troops away for request I, by land or sea, M months from their journey's
+            // end, going out or coming back (for looking at the empire map).
+            ["away", i, way, m, dir] => world.military.battles.push(osiris_sim::military::DistantBattle {
+                request: i.parse()?,
+                sea: *way == "sea",
+                months: m.parse()?,
+                fought: *dir == "back",
+                ..Default::default()
+            }),
             ["fortreturn", c] => _ = world.apply(&Command::ReturnCompany(c.parse()?)),
             // The company window's switch that turns the next held line.
             ["rotate", c] => _ = world.apply(&Command::RotateLine(c.parse()?)),
@@ -673,7 +689,7 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
                 world.festival_now(g.parse::<usize>()?.min(4), s.parse()?);
                 for f in world.figures.iter().filter(|f| f.kind == osiris_sim::festivals::FESTIVAL_GUY && !before.contains(&f.id)) {
                     let home = world.buildings.get(f.home).map_or(0, |b| b.kind);
-                    eprintln!("  festival walker {} from building {} (kind {home}) at {},{} as {:?}", f.id, f.home, f.x, f.y, osiris_sim::festivals::festival_look(&world, f));
+                    eprintln!("  festival walker {} from building {} (kind {home}) at {},{} as {:?}", f.id, f.home, f.x, f.y, osiris_sim::festivals::festival_look(world, f));
                 }
             }
             // Starts the scenario's earthquake now, or one at a tile with a severity.
@@ -697,6 +713,8 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
                 };
                 world.apply(&Command::CompanyOrder { company: c.parse()?, order });
             }
+            // Where boats come in and leave by the river (snapped to open water).
+            ["river"] => eprintln!("{step}: entry {:?} exit {:?}", world.river_entry(), world.river_exit()),
             ["seapoint", p] => world.invasions.sea_points.push(parse_point(p)?),
             ["landpoint", p] => world.invasions.land_points.push(parse_point(p)?),
             // Opens a call for troops against strength N from trade city C (by sea, if
@@ -721,8 +739,8 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
             }
             ["army"] => {
                 for (i, c) in world.military.companies.iter().enumerate() {
-                    let alive: Vec<(i32, i32, u16, i32)> = c.soldiers.iter().filter_map(|&s| world.figures.get(s)).map(|f| (f.x, f.y, f.action, f.damage)).collect();
-                    eprintln!("  company {i} fort {} kind {} at_fort {} morale {} schooled {} wind {} experience {} order {:?} turned {} charged {} wounds {}% soldiers {} recruits {} {:?}", c.fort, c.kind, c.at_fort, c.morale, c.schooled, c.wind, c.experience, c.order, c.turned, c.charged, world.company_wounds(i), c.soldiers.len(), c.recruits.len(), alive);
+                    let alive: Vec<(i32, i32, u16, i32, u8)> = c.soldiers.iter().filter_map(|&s| world.figures.get(s)).map(|f| (f.x, f.y, f.action, f.damage, f.slot)).collect();
+                    eprintln!("  company {i} fort {} kind {} standard {:?} at_fort {} morale {} routed {}/{} schooled {} experience {} order {:?} turned {} charged {} wounds {}% soldiers {} recruits {} {:?}", c.fort, c.kind, c.standard_tile, c.at_fort, c.morale, c.routed, c.broken, c.schooled, c.experience, c.order, c.turned, c.charged, world.company_wounds(i), c.soldiers.len(), c.recruits.len(), alive);
                 }
                 for b in world.buildings.iter().filter(|b| b.kind == osiris_sim::military::RECRUITER) {
                     eprintln!("  recruiter {} workers {} days {} weapons {} chariots {} wanted {}", b.id, b.workers, b.spawn_delay, b.stock[osiris_sim::military::WEAPONS as usize], b.stock[osiris_sim::military::CHARIOTS as usize], world.recruits_wanted(b.id));
@@ -730,7 +748,7 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
                 for (i, a) in world.invasions.armies.iter().enumerate() {
                     let alive: Vec<(i32, i32, u16, u16, i32)> = a.figures.iter().filter_map(|&s| world.figures.get(s)).map(|f| (f.x, f.y, f.kind, f.action, f.damage)).collect();
                     let t = world.buildings.get(a.target).map(|b| (b.kind, b.x, b.y, b.enemy_damage));
-                    eprintln!("  army {i} invader {} nation {} target {} {:?} morale {} fleeing {} {:?}", a.invader, a.nation, a.target, t, a.morale, a.fleeing, alive);
+                    eprintln!("  army {i} invader {} nation {} target {} {:?} morale {:?} withdrawn {:?} {:?}", a.invader, a.nation, a.target, t, a.band_morale, a.withdrawn, alive);
                 }
                 eprintln!("  battles {:?} kingdom {}", world.military.battles, world.ratings.kingdom);
                 eprintln!("  points land {:?} sea {:?} landings {:?}", world.invasions.land_points, world.invasions.sea_points, world.invasions.landings);
@@ -1310,7 +1328,7 @@ pub fn run_script(world: &mut World, script: &str) -> Result<ScriptView> {
                     world.time.year, world.time.month, world.population, world.treasury, r.culture, r.prosperity, r.prosperity_max, r.monument, r.kingdom, l.employed, l.available, l.needed, l.shortage, world.unemployment, f.last_year, r.tribute_unpaid_years
                 );
             }
-            ["citysounds", p] => eprintln!("{}", crate::city_sounds::describe(&world, parse_point(p)?)),
+            ["citysounds", p] => eprintln!("{}", crate::city_sounds::describe(world, parse_point(p)?)),
             ["report"] => {
                 let houses: Vec<String> = world
                     .buildings

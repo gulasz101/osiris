@@ -71,6 +71,8 @@ pub enum Command {
     Donate(i32),
     DispatchBurial { resource: u16, units: i32 },
     DispatchRequest(usize),
+    /// The answer to a gift's offer: a `scenario_events::gift_choice` button.
+    AnswerGift { event: usize, choice: u8 },
     ReturnCompany(usize),
     MoveCompany { company: usize, x: i32, y: i32 },
     CompanyOrder { company: usize, order: crate::military::Order },
@@ -547,10 +549,8 @@ impl World {
             }
             &Command::DispatchBurial { resource, units } => Outcome::Done { items: self.dispatch_burial(resource, units), cost: 0 },
             &Command::DispatchRequest(i) => done_if(self.dispatch_request(i)),
-            &Command::ReturnCompany(c) => {
-                self.return_company(c);
-                DONE
-            }
+            &Command::AnswerGift { event, choice } => done_if(self.answer_gift(event, choice)),
+            &Command::ReturnCompany(c) => done_if(self.return_company(c)),
             &Command::MoveCompany { company, x, y } => done_if(self.move_company(company, (x, y))),
             &Command::CompanyOrder { company, order } => {
                 self.set_order(company, order);

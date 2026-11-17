@@ -1,7 +1,7 @@
 # web-mission Specification
 
 ## Purpose
-TBD - created by archiving change web-mission. Update Purpose after archive.
+Start a campaign mission in the browser, either from `?mission=N` in the page URL or from the main menu, and run its city with the simulation advancing.
 
 ## Requirements
 

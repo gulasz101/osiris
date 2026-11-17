@@ -8,7 +8,6 @@ version.workspace = true
 [dependencies]
 osiris-vfs = { path = "../osiris-vfs" }
 rodio = "0.22"
-serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 thiserror = "2"
 rand = "0.10"

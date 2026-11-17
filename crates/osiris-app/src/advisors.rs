@@ -128,8 +128,6 @@ enum Popup {
     Resource(u16),
     /// Priority for one labor category.
     Priority(usize),
-    /// The price list.
-    Prices,
     /// Choosing a festival: its god, then its size.
     Festival(Option<usize>),
     /// Asking before sending what a request wants, or saying there is not enough.
@@ -156,7 +154,10 @@ impl Advisors {
             ("gift", _) => Some(Popup::Gift),
             ("donate", _) => Some(Popup::Donate(0)),
             ("burial", _) => Some(Popup::Burial(13, 0)),
-            ("prices", _) => Some(Popup::Prices),
+            ("prices", _) => {
+                self.show_prices = true;
+                None
+            }
             ("festival", None) => Some(Popup::Festival(None)),
             ("festival", Some(g)) => Some(Popup::Festival(Some(g))),
             ("resource", Some(r)) => Some(Popup::Resource(r as u16)),
@@ -180,11 +181,14 @@ pub struct Advisors {
     scroll: usize,
     /// The military overseer shows the navy's page.
     navy: bool,
+    /// The Overseer of Commerce lists prices in place of trade status (the
+    /// original's flag at 0xea623c, cleared each time the overseers open).
+    show_prices: bool,
 }
 
 impl Advisors {
     pub fn new(current: Advisor) -> Self {
-        Self { current, popup: None, click: None, cursor: [0.0; 2], scroll: 0, navy: false }
+        Self { current, popup: None, click: None, cursor: [0.0; 2], scroll: 0, navy: false, show_prices: false }
     }
 
     fn panel_origin(screen: [f32; 2]) -> [f32; 2] {
@@ -201,6 +205,21 @@ impl Advisors {
 
     pub fn scroll(&mut self, lines: i32) {
         self.scroll = (self.scroll as i32 + lines).max(0) as usize;
+    }
+
+    /// The notice popup open (its title and text lines in group 5), and whether the
+    /// military overseer shows the navy, for tests.
+    #[cfg(test)]
+    pub fn notice(&self) -> Option<(usize, usize)> {
+        match self.popup {
+            Some(Popup::Notice(t, l)) => Some((t, l)),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn navy_page(&self) -> bool {
+        self.navy
     }
 
     /// Right-click: closes a popup, or the overseers.
@@ -234,6 +253,8 @@ impl Advisors {
         let button_y = ((screen[1] + 418.0) / 2.0).floor();
         ui.image(img.strip, strip_x, strip_y);
         let mut switch_to = None;
+        // Set when "Dispatch now" found more than one call to answer.
+        let mut choose_call = false;
         for (i, &(a, x, w)) in STRIP.iter().enumerate() {
             let rect = [strip_x + x, button_y, w, 32.0];
             let id = img.buttons + 4 * i as u32;
@@ -266,7 +287,7 @@ impl Advisors {
         ui.image(img.icons + self.current.index() as u32, px + 10.0, py + 10.0);
         let from_screen = match self.current {
             Advisor::Labor => labor(&mut ui, img.lock, world, [px, py], &mut self.popup),
-            Advisor::Trade => trade(&mut ui, world, [px, py], &mut self.popup, &mut self.scroll),
+            Advisor::Trade => trade(&mut ui, world, [px, py], &mut self.popup, &mut self.scroll, &mut self.show_prices),
             Advisor::Financial => financial(&mut ui, world, [px, py]),
             Advisor::Chief => chief(&mut ui, world, [px, py]),
             Advisor::Ratings => ratings(&mut ui, world, [px, py], &mut self.scroll),
@@ -290,6 +311,7 @@ impl Advisors {
                 // Overseer, and a word to choose there (0x40a4ce).
                 if several {
                     switch_to = Some(Advisor::Political);
+                    choose_call = true;
                 }
                 page
             }
@@ -301,7 +323,6 @@ impl Advisors {
             let closed = match self.popup {
                 Some(Popup::Resource(r)) => resource_popup(&mut ui, world, r),
                 Some(Popup::Priority(c)) => priority_popup(&mut ui, world, c),
-                Some(Popup::Prices) => prices_popup(&mut ui, world),
                 Some(Popup::Festival(god)) => match festival_popup(&mut ui, world, god) {
                     FestivalChoice::Close => true,
                     FestivalChoice::God(g) => {
@@ -335,9 +356,8 @@ impl Advisors {
             }
         }
         if let Some(a) = switch_to {
-            let several = self.current == Advisor::Military && a == Advisor::Political;
             self.current = a;
-            self.popup = several.then_some(Popup::Notice(102, 103));
+            self.popup = choose_call.then_some(Popup::Notice(102, 103));
             self.scroll = 0;
         }
         action
@@ -473,12 +493,24 @@ fn trade_count(r: u16, n: i32) -> i32 {
     if BLOCK_GOODS.contains(&r) || matches!(r, 10 | 28) { n / 100 } else { n }
 }
 
-fn trade(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], popup: &mut Option<Popup>, scroll: &mut usize) -> Option<AdvisorAction> {
+/// The Overseer of Commerce (FUN_00559e10 and FUN_0055a0e0). "Show prices" switches
+/// the list in place to the price of a load of each good: the hint line gives way to
+/// "Buyers pay" and "Sellers receive" over two columns 100 pixels wide at 175 and 275,
+/// each price centred in its column, and at 425 what the price is for (per block of
+/// stone, per weapon, per chariot, per 100 pieces of anything else); the button then
+/// reads "Return to trade status". Rows still open a good's trade settings.
+fn trade(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], popup: &mut Option<Popup>, scroll: &mut usize, show_prices: &mut bool) -> Option<AdvisorAction> {
     const G: usize = 54;
     let title = ui.t(G, 0);
     ui.label(Font::LargeBlackOnLight, &title, px + 60.0, py + 17.0);
-    let hint = ui.t(G, 1);
-    ui.label(Font::NormalBlackOnLight, &hint, px + 60.0, py + 40.0);
+    if *show_prices {
+        let (buy, sell) = (ui.t(G, 22), ui.t(G, 23));
+        ui.label(Font::NormalBlackOnLight, &buy, px + 175.0, py + 40.0);
+        ui.label(Font::NormalBlackOnLight, &sell, px + 275.0, py + 40.0);
+    } else {
+        let hint = ui.t(G, 1);
+        ui.label(Font::NormalBlackOnLight, &hint, px + 60.0, py + 40.0);
+    }
     panel::inner_panel(ui.r, ui.panels, px + 17.0, py + 60.0, 36, 21);
     let list = trade_resources(world);
     const ROWS: usize = 15;
@@ -491,6 +523,24 @@ fn trade(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], popup: &mut Option<
         let hot = ui.hot(rect);
         let nf = if world.is_mothballed(r) || hot { Font::NormalYellow } else { Font::NormalWhiteOnDark };
         draw_text(ui.r, nf, &name, px + 52.0, y, font::WHITE);
+        if ui.clicked(rect) {
+            *popup = Some(Popup::Resource(r));
+        }
+        if *show_prices {
+            // The table's own prices, before any blessing of Ra.
+            let (buy, sell) = world.trade.prices.get(r as usize).copied().unwrap_or_default();
+            ui.centred(Font::NormalWhiteOnDark, &buy.to_string(), px + 175.0, y, 100.0);
+            ui.centred(Font::NormalWhiteOnDark, &sell.to_string(), px + 275.0, y, 100.0);
+            let per = match r {
+                _ if BLOCK_GOODS.contains(&r) => 49,
+                10 => 47,
+                28 => 48,
+                _ => 50,
+            };
+            let per = ui.t(G, per);
+            draw_text(ui.r, Font::NormalWhiteOnDark, &per, px + 425.0, y, font::WHITE);
+            continue;
+        }
         draw_text(ui.r, Font::NormalWhiteOnDark, &trade_count(r, world.yards_stored(r)).to_string(), px + 206.0, y, font::WHITE);
         if world.is_stockpiled(r) {
             let s = ui.t(G, 3);
@@ -537,9 +587,6 @@ fn trade(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], popup: &mut Option<
         } else {
             draw_text(ui.r, Font::NormalWhiteOnDark, &s, sx, y - 2.0, font::WHITE);
         }
-        if ui.clicked(rect) {
-            *popup = Some(Popup::Resource(r));
-        }
     }
     if list.len() > ROWS {
         if *scroll > 0 && ui.arrow(px + 596.0, py + 64.0, true) {
@@ -553,48 +600,11 @@ fn trade(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], popup: &mut Option<
     if ui.button([px + 48.0, py + 396.0, 200.0, 24.0], &goto, Font::NormalBlackOnLight) {
         return Some(AdvisorAction::OpenEmpire);
     }
-    let prices = ui.t(G, 2);
+    let prices = ui.t(G, if *show_prices { 46 } else { 2 });
     if ui.button([px + 368.0, py + 396.0, 200.0, 24.0], &prices, Font::NormalBlackOnLight) {
-        *popup = Some(Popup::Prices);
+        *show_prices = !*show_prices;
     }
     None
-}
-
-/// Prices throughout Egypt: what buyers pay and sellers receive for each good.
-///
-/// The trade_prices_window is 56x16 tiles, with up to 18 icons a row 42
-/// pixels apart starting at (156, 44), a 90-pixel row pitch, buy/sell prices 30 and
-/// 50 pixels under each icon, and the "Buyers pay"/"Sellers receive" labels at a
-/// fixed x of 26 (28 and 48 pixels under the row, level with the numbers).
-fn prices_popup(ui: &mut Ui, world: &World) -> bool {
-    const G: usize = 54;
-    let screen = ui.r.screen;
-    let list: Vec<u16> = (1..osiris_sim::trade::RESOURCES as u16).filter(|&r| world.buy_price(r) > 0).collect();
-    let per_row = 18;
-    let (w, h) = (896.0, 256.0);
-    let (x, y) = (((screen[0] - w) / 2.0).floor(), ((screen[1] - h) / 2.0).floor());
-    panel::outer_panel(ui.r, ui.panels, x, y, 56, 16);
-    let title = ui.t(G, 21);
-    let tw = ui.width(Font::LargeBlackOnLight, &title);
-    ui.label(Font::LargeBlackOnLight, &title, x + (w - tw) / 2.0, y + 12.0);
-    for (row, chunk) in list.chunks(per_row).enumerate() {
-        let ry = y + 44.0 + 90.0 * row as f32;
-        let (buy, sell) = (ui.t(G, 22), ui.t(G, 23));
-        ui.label(Font::NormalBlackOnLight, &buy, x + 26.0, ry + 28.0);
-        ui.label(Font::NormalBlackOnLight, &sell, x + 26.0, ry + 48.0);
-        for (i, &r) in chunk.iter().enumerate() {
-            let cx = x + 156.0 + 42.0 * i as f32;
-            ui.icon(r, cx, ry);
-            let (b, s) = (world.buy_price(r).to_string(), world.sell_price(r).to_string());
-            // Right-aligned to the next icon's column so a 3-digit price never runs
-            // into it (the original's plain left-aligned label can, at this pitch).
-            let bw = ui.width(Font::NormalBlackOnLight, &b);
-            ui.label(Font::NormalBlackOnLight, &b, cx + 38.0 - bw, ry + 30.0);
-            let sw = ui.width(Font::NormalBlackOnLight, &s);
-            ui.label(Font::NormalBlackOnLight, &s, cx + 38.0 - sw, ry + 50.0);
-        }
-    }
-    ui.click.take().is_some()
 }
 
 /// The trade settings of one resource: import and export, industry on or off, and
@@ -1566,6 +1576,11 @@ fn popup_line(ui: &mut Ui, line: &str, x: f32, y: f32, w: f32) {
     }
 }
 
+/// The military pages' "Dispatch now" button and the army/navy switch, from the
+/// overseer panel's corner.
+pub const DISPATCH: [f32; 4] = [545.0, 35.0, 75.0, 35.0];
+pub const ARMY_NAVY: [f32; 4] = [532.0, 347.0, 80.0, 48.0];
+
 /// The "Dispatch now" button both military pages show while something at home is
 /// marked for Kingdom service (0x40a450). It sends the marked troops to the first
 /// open call by land and the first by sea, each if something marked can go that
@@ -1603,7 +1618,7 @@ fn service_heading(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], marked: b
         }
         return false;
     }
-    let rect = [px + 545.0, py + 35.0, 75.0, 35.0];
+    let rect = [px + DISPATCH[0], py + DISPATCH[1], DISPATCH[2], DISPATCH[3]];
     let hot = ui.hot(rect);
     panel::button_border(ui.r, ui.panels, rect[0], rect[1], 75, 35, hot);
     for (id, y) in [(30, 40.0), (31, 54.0)] {
@@ -1618,12 +1633,33 @@ fn service_heading(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], marked: b
 /// page, the army's on the navy page; its hit box at 0x5c4ec8 and 0x5c50f8, 80x48
 /// at 532,347). True if clicked.
 fn army_navy_switch(ui: &mut Ui, [px, py]: [f32; 2], navy: bool) -> bool {
-    let rect = [px + 532.0, py + 347.0, 80.0, 48.0];
+    let rect = [px + ARMY_NAVY[0], py + ARMY_NAVY[1], ARMY_NAVY[2], ARMY_NAVY[3]];
     let image = ui.r.library.group_id("Pharaoh_General", 4, 0).unwrap_or(0) + u32::from(!navy);
     ui.image(image, rect[0], rect[1]);
     let hot = ui.hot(rect);
     panel::button_border(ui.r, ui.panels, rect[0], rect[1], 80, 48, hot);
     ui.clicked(rect)
+}
+
+/// What the scouts report of threats to the city, on both military pages (text
+/// group 51; FUN_00522e10 and the army page): soldiers of Pharaoh or another
+/// Egyptian city in the city (11, the count at 0xea5eb4), foreign soldiers or
+/// warships (10, the enemies-present count at 0xea5ea4, to which an enemy warship
+/// adds), an invasion announced (9), or none (8).
+fn threat_line(world: &World) -> usize {
+    use osiris_sim::invasions::{invader, is_invader_kind};
+    let alive = |id: osiris_sim::figures::FigureId| world.figures.get(id).is_some_and(|f| !f.dead && f.action != osiris_sim::military::action::CORPSE);
+    let egyptian: Vec<osiris_sim::figures::FigureId> = world.invasions.armies.iter().filter(|a| matches!(a.invader, invader::EGYPT | invader::PHARAOH)).flat_map(|a| a.figures.iter().copied()).filter(|&id| alive(id)).collect();
+    let foreign = world.figures.iter().any(|f| (is_invader_kind(f.kind) && !egyptian.contains(&f.id) || f.kind == osiris_sim::navy::ENEMY_WARSHIP) && alive(f.id));
+    if !egyptian.is_empty() {
+        11
+    } else if foreign {
+        10
+    } else if world.invasions.planned.iter().any(|p| p.announced && !p.done) {
+        9
+    } else {
+        8
+    }
 }
 
 /// What the scouts report about the Kingdom's calls for troops, army and navy
@@ -1651,6 +1687,25 @@ fn kingdom_call_line(world: &World) -> usize {
     } else {
         12
     }
+}
+
+/// A warship row's button on the navy page, by column: go to it, back to its wharf,
+/// Kingdom service; 30 pixels square at x 440, 500 and 560, the rows 44 apart from
+/// y 83 (FUN_00522e10).
+pub fn navy_button([px, py]: [f32; 2], row: usize, col: usize) -> [f32; 4] {
+    [px + 440.0 + 60.0 * col as f32, py + 83.0 + 44.0 * row as f32, 30.0, 30.0]
+}
+
+/// The overseer panel's corner on a screen of size `screen`.
+pub fn panel_origin(screen: [f32; 2]) -> [f32; 2] {
+    Advisors::panel_origin(screen)
+}
+
+/// The middle of overseer `a`'s button on the strip under the panel, for tests.
+#[cfg(test)]
+pub fn strip_button_centre(screen: [f32; 2], a: Advisor) -> [f32; 2] {
+    let &(_, x, w) = STRIP.iter().find(|s| s.0 == a).expect("on the strip");
+    [((screen[0] - 640.0) / 2.0).floor() + x + w / 2.0, ((screen[1] + 418.0) / 2.0).floor() + 16.0]
 }
 
 /// The navy's page (FUN_00520ea0 case 3, its buttons FUN_00523bb0): a row for each
@@ -1714,15 +1769,15 @@ fn navy(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], several: &mut bool, 
             ui.label(Font::NormalBlackOnDark, &away, px + 500.0, ry + 4.0);
             continue;
         }
-        let bx = |x: f32| [px + x, ry + 1.0, 30.0, 30.0];
-        let go = bx(440.0);
+        let bx = |col: usize| navy_button([px, py], row, col);
+        let go = bx(0);
         let hot = ui.hot(go);
         panel::button_border(ui.r, ui.panels, go[0], go[1], 30, 30, hot);
         ui.image(buttons, go[0] + 3.0, go[1] + 3.0);
         if ui.clicked(go) {
             action = Some(AdvisorAction::GoToShip(s));
         }
-        let back = bx(500.0);
+        let back = bx(1);
         let hot = ui.hot(back);
         let docked = world.ship_docked(s);
         panel::button_border(ui.r, ui.panels, back[0], back[1], 30, 30, hot);
@@ -1730,11 +1785,17 @@ fn navy(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], several: &mut bool, 
         if ui.clicked(back) && !docked {
             world.apply(&Command::ShipOrder { ship: s, order: ShipOrder::Return });
         }
-        // The mark lights up only while a city by sea is calling for troops.
-        let service = bx(560.0);
+        // The mark lights up only while a city by sea is calling for troops; with no
+        // such call it shows its greyed picture, and a mark left from a call since
+        // closed is taken off as the page is drawn (FUN_00522e10).
+        let service = bx(2);
         let hot = sea_call && ui.hot(service);
         panel::button_border(ui.r, ui.panels, service[0], service[1], 30, 30, hot);
-        ui.image(buttons + if st.service { 3 } else { 4 }, service[0] + 3.0, service[1] + 3.0);
+        if !sea_call && st.service {
+            world.apply(&Command::ShipService(s));
+        }
+        let mark = if !sea_call { 5 } else if st.service { 3 } else { 4 };
+        ui.image(buttons + mark, service[0] + 3.0, service[1] + 3.0);
         if ui.clicked(service) {
             // Refused, it says why (0x40a600).
             let refusal = world.service_refusal(true);
@@ -1754,9 +1815,7 @@ fn navy(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], several: &mut bool, 
         }
         lines.push((348.0, fleet));
     }
-    let invaders = world.figures.iter().any(|f| osiris_sim::invasions::is_invader_kind(f.kind));
-    let coming = world.invasions.planned.iter().any(|p| p.announced && !p.done);
-    let threat = ui.t(G, if invaders { 10 } else if coming { 9 } else { 8 });
+    let threat = ui.t(G, threat_line(world));
     lines.push((if warships.is_empty() { 358.0 } else { 368.0 }, threat));
     let call = ui.t(G, kingdom_call_line(world));
     lines.push((388.0, call));
@@ -1856,9 +1915,7 @@ fn military(ui: &mut Ui, world: &mut World, [px, py]: [f32; 2], several: &mut bo
         let n = companies.len();
         lines.push((348.0, format!("{soldiers} {} {} {n} {}", ui.t(8, if soldiers == 1 { 46 } else { 47 }), ui.t(G, 7), ui.t(8, if n == 1 { 48 } else { 49 }))));
     }
-    let invaders = world.figures.iter().any(|f| osiris_sim::invasions::is_invader_kind(f.kind));
-    let coming = world.invasions.planned.iter().any(|p| p.announced && !p.done);
-    let threat = ui.t(G, if invaders { 10 } else if coming { 9 } else { 8 });
+    let threat = ui.t(G, threat_line(world));
     lines.push((if companies.is_empty() { 358.0 } else { 368.0 }, threat));
     let abroad = ui.t(G, kingdom_call_line(world));
     lines.push((388.0, abroad));

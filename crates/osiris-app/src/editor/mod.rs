@@ -163,6 +163,17 @@ pub enum Tool {
 }
 
 impl Tool {
+    /// The tool's name for the browser smoke test (`web-soak`).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn debug_name(self) -> &'static str {
+        match self {
+            Tool::None => "none",
+            Tool::Paint(_) => "paint",
+            Tool::Road => "road",
+            Tool::Point(_) => "point",
+        }
+    }
+
     /// The tool's name in the black box under the map (text group 49).
     pub fn name_id(self) -> Option<usize> {
         Some(match self {

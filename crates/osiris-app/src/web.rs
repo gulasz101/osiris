@@ -92,6 +92,61 @@ pub fn debug_audio_beep() {
     });
 }
 
+// ── The soak run: frames, memory and the editor's state ────────────
+
+thread_local! {
+    /// Whether the soak run's log lines are on. A player's console stays quiet out of
+    /// sight; the smoke test's `SMOKE_SOAK=1` turns them on before the city starts.
+    static SOAK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Turns the soak run's log lines on or off (browser only; the smoke test calls this).
+#[wasm_bindgen]
+pub fn set_soak(on: bool) {
+    SOAK.with(|cell| cell.set(on));
+}
+
+/// Whether the soak run's log lines are on (`main.rs` asks before it logs).
+pub fn soak() -> bool {
+    SOAK.with(Cell::get)
+}
+
+/// The wasm instance's memory size in bytes, from `WebAssembly.Memory.buffer.byteLength`
+/// (browser only, for the soak run).
+///
+/// `wasm_bindgen::memory()` hands back this instance's `WebAssembly.Memory`, which the page's
+/// own JavaScript cannot reach. The size comes back as a `f64` because that is what the page's
+/// `byteLength` is, so nothing rounds it on the way out.
+#[wasm_bindgen]
+pub fn memory_bytes() -> f64 {
+    let memory = wasm_bindgen::memory();
+    let Ok(buffer) = js_sys::Reflect::get(&memory, &JsValue::from_str("buffer")) else {
+        return 0.0;
+    };
+    js_sys::Reflect::get(&buffer, &JsValue::from_str("byteLength"))
+        .ok()
+        .and_then(|size| size.as_f64())
+        .unwrap_or(0.0)
+}
+
+thread_local! {
+    /// The Mission Editor's state as JSON, filled by `main.rs` as the editor draws and read
+    /// by the smoke test, which cannot see the editor's own fields.
+    static DEBUG_EDITOR: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Keeps the editor state drawn last, for the smoke test (browser only, `main.rs` calls this).
+pub fn set_debug_editor(json: String) {
+    DEBUG_EDITOR.with(|cell| *cell.borrow_mut() = json);
+}
+
+/// The Mission Editor's state as JSON, the way `main.rs` last built it:
+/// `{"name":"Small Oasis","dirty":true,"path":null,"status":"Saved ...","tool":"paint"}`.
+#[wasm_bindgen]
+pub fn debug_editor() -> String {
+    DEBUG_EDITOR.with(|cell| cell.borrow().clone())
+}
+
 // ── IndexedDB store bindings (browser only) ────────────────────────
 
 #[wasm_bindgen]

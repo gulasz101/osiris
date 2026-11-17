@@ -38,6 +38,10 @@ mod overlay;
 mod mission_brief;
 mod progress;
 mod recording;
+// The soak run's arithmetic: frames a second and the month-by-month memory readings. Plain
+// code, built for both targets so its test runs in `cargo test`; only the browser's log
+// lines and the smoke test use it, so the desktop build would report it as unused.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod soak;
 // The saved games the page can list, download and import: plain code, built for both targets
 // so its test runs in `cargo test` as well as in the browser build. Only the browser's page
@@ -647,6 +651,13 @@ struct App {
     /// line each time the month turns (`osiris web: city month <n>`, web-mission).
     #[cfg(target_arch = "wasm32")]
     web_month: Option<u32>,
+    /// Browser-only: the soak run's frame-rate window, `None` until `SMOKE_SOAK=1` is on
+    /// (web-soak).
+    #[cfg(target_arch = "wasm32")]
+    web_fps: Option<soak::Fps>,
+    /// Browser-only: the soak run's one memory reading a month (web-soak).
+    #[cfg(target_arch = "wasm32")]
+    web_growth: Option<soak::Growth>,
 }
 
 impl App {
@@ -758,6 +769,10 @@ impl App {
         match editor::Editor::open(path, self.assets.defs.clone(), self.assets.text.clone(), maps_dir()) {
             Ok(mut e) => {
                 e.data = self.assets.data.clone();
+                // One line when the editor opens a map, so the smoke test knows the editor
+                // is up without polling a frame (web-soak).
+                #[cfg(target_arch = "wasm32")]
+                log::info!("osiris web: editor open {}", e.name);
                 self.screen = Some(Screen::Editor(Box::new(e)));
             }
             Err(e) => self.status = Some((trf("Could not open the map: {0}", &[&e]), 5.0)),
@@ -793,6 +808,9 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         {
             self.web_month = Some(world.time.month);
+            // A new city is a new memory baseline: the soak run's year of growth
+            // starts again with this city's first month (web-soak).
+            self.web_growth = None;
         }
         recording::start(&mut world);
         let briefing = review_view(&self.assets, &world, mission, None);
@@ -1802,6 +1820,22 @@ impl App {
         let now = web_time::Instant::now();
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
+        // The soak run counts the game's own frames here, where the renderer is already
+        // drawing (web-soak). A player's console stays quiet: nothing is counted unless
+        // the smoke test turned the lines on.
+        #[cfg(target_arch = "wasm32")]
+        if crate::web::soak() {
+            let rate = match &mut self.web_fps {
+                Some(fps) => fps.frame(now),
+                None => {
+                    self.web_fps = Some(soak::Fps::new(now));
+                    None
+                }
+            };
+            if let Some(rate) = rate {
+                log::info!("osiris web: fps {}", rate.round() as i64);
+            }
+        }
         if let Some((_, t)) = &mut self.status {
             *t -= dt;
             if *t <= 0.0 {
@@ -1880,6 +1914,22 @@ impl App {
                         Some(last) if last != month => {
                             self.web_month = Some(month);
                             log::info!("osiris web: city month {month}");
+                            // The soak run reads the memory once a game month, and says
+                            // so when every month for a year has grown (web-soak).
+                            if crate::web::soak() {
+                                let bytes = crate::web::memory_bytes() as u64;
+                                log::info!("osiris web: soak month {month} memory {bytes}");
+                                let leak = match &mut self.web_growth {
+                                    Some(growth) => growth.month(bytes) && growth.run() == soak::GROWTH_RUN,
+                                    None => {
+                                        self.web_growth = Some(soak::Growth::new(bytes));
+                                        false
+                                    }
+                                };
+                                if leak {
+                                    log::info!("osiris web: soak memory grew every month");
+                                }
+                            }
                         }
                         None => self.web_month = Some(month),
                         _ => {}
@@ -1958,6 +2008,16 @@ impl App {
                         osiris_ui::draw_text(r, osiris_ui::Font::NormalYellow, s, 20.0, 50.0, osiris_ui::font::WHITE);
                     }
                 });
+                // The smoke test cannot see the editor's fields from the page, so the
+                // state it needs is left as JSON after each frame (web-soak).
+                #[cfg(target_arch = "wasm32")]
+                crate::web::set_debug_editor(soak::editor_json(
+                    &e.name,
+                    e.dirty,
+                    e.path.as_deref(),
+                    e.view.last_said(),
+                    e.tool.debug_name(),
+                ));
             }
             Some(Screen::Movie(m, _)) => {
                 m.update();
@@ -2508,6 +2568,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         pending: Rc::new(RefCell::new(None)),
         #[cfg(target_arch = "wasm32")]
         web_month: None,
+        #[cfg(target_arch = "wasm32")]
+        web_fps: None,
+        #[cfg(target_arch = "wasm32")]
+        web_growth: None,
         // Replaced in `resumed`, once the window (and its monitor) exists.
         windowed_size: initial_size,
     };

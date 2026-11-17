@@ -239,6 +239,12 @@ impl View {
         self.status = Some((s.to_owned(), 3.0));
     }
 
+    /// The last message the editor showed, for the browser smoke test (web-soak).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn last_said(&self) -> Option<&str> {
+        self.status.as_ref().map(|(s, _)| s.as_str())
+    }
+
     /// The camera as the map stores it (`city_view_camera`): the view's top-left
     /// corner in half tiles, the inverse of where the game starts its camera.
     pub fn camera_to_save(&self, map: &Map, s: &osiris_formats::Scenario) -> [i32; 2] {

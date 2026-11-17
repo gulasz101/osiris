@@ -6,6 +6,7 @@
 //! count it works with as an argument instead of reading a clock itself, which is what
 //! lets the test below run over made-up times rather than waiting ten real seconds.
 
+use std::path::Path;
 use web_time::{Duration, Instant};
 
 /// How often the soak reports its frame rate: every ten seconds of real time.
@@ -76,6 +77,39 @@ impl Growth {
     }
 }
 
+/// The Mission Editor's state as JSON for the smoke test, which cannot read the editor's
+/// fields from the page:
+/// `{"name":"Small Oasis","dirty":true,"path":null,"status":"Saved ...","tool":"paint"}`.
+pub fn editor_json(name: &str, dirty: bool, path: Option<&Path>, status: Option<&str>, tool: &str) -> String {
+    let path = match path {
+        Some(p) => format!("\"{}\"", json_text(&p.to_string_lossy())),
+        None => "null".to_owned(),
+    };
+    let status = match status {
+        Some(s) => format!("\"{}\"", json_text(s)),
+        None => "null".to_owned(),
+    };
+    format!(
+        "{{\"name\":\"{}\",\"dirty\":{dirty},\"path\":{path},\"status\":{status},\"tool\":\"{}\"}}",
+        json_text(name),
+        json_text(tool)
+    )
+}
+
+/// `s` as the inside of a JSON string.
+fn json_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +177,26 @@ mod tests {
             assert!(!growth.month(last), "month {month}");
         }
         assert!(growth.month(last + 65_536));
+    }
+
+    #[test]
+    fn editor_json_reports_the_editor_state() {
+        // Nothing picked yet: no path, no message, and the tool's own name.
+        assert_eq!(
+            editor_json("Small Oasis", false, None, None, "none"),
+            r#"{"name":"Small Oasis","dirty":false,"path":null,"status":null,"tool":"none"}"#
+        );
+    }
+
+    #[test]
+    fn editor_json_quotes_a_saved_path_and_a_message() {
+        // A quote or a backslash in a name must not break the JSON the test parses, and a
+        // saved path is a string, not `null`.
+        let path = Path::new(r#"/user/maps/Soak "Edit".map"#);
+        let json = editor_json("Soak \"Edit\"", true, Some(path), Some("Saved /user/maps/Soak \"Edit\".map"), "paint");
+        assert_eq!(
+            json,
+            r#"{"name":"Soak \"Edit\"","dirty":true,"path":"/user/maps/Soak \"Edit\".map","status":"Saved /user/maps/Soak \"Edit\".map","tool":"paint"}"#
+        );
     }
 }

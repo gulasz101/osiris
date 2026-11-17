@@ -176,6 +176,34 @@ extern "C" {
     fn store_del(path: &str);
 }
 
+// ── Lazy game files (browser only) ─────────────────────────────────
+
+#[wasm_bindgen]
+extern "C" {
+    /// The page's one reader of a game file's bytes (`web/files.js`), synchronous.
+    ///
+    /// It throws when the page has no file under that path, which `catch` hands back as
+    /// `Err` instead of unwinding through the game.
+    #[wasm_bindgen(catch, js_namespace = osirisFiles, js_name = read)]
+    fn files_read(path: &str) -> Result<Vec<u8>, JsValue>;
+}
+
+/// Read a game file the page holds outside wasm memory (browser only).
+///
+/// `osiris-vfs` calls this for a lazy entry, with the exact path the page registered the
+/// file under. The bytes go straight back to the game and the store keeps nothing, so a
+/// file the game reads twice is read from the browser twice. A failed read is a warning
+/// and reads as a missing file.
+fn lazy_read(path: &str) -> Option<Vec<u8>> {
+    match files_read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(err) => {
+            log::warn!("osiris web: reading {path} failed: {err:?}");
+            None
+        }
+    }
+}
+
 /// The change-callback used by the VFS hook.
 fn on_change(change: osiris_vfs::Change) {
     match change {
@@ -196,6 +224,9 @@ pub fn init() {
     // Watch /user so writes are recorded, and connect the hook to IndexedDB.
     osiris_vfs::watch("/user");
     osiris_vfs::set_change_hook(on_change);
+
+    // A lazy game file's bytes come from the page's own copy of the file.
+    osiris_vfs::set_lazy_reader(lazy_read);
 }
 
 /// A [`log`] subscriber that forwards records to the browser console.
@@ -224,18 +255,30 @@ impl log::Log for WebLogger {
 /// `/Pharaoh/Data/Pharaoh_General.sg3`.
 ///
 /// [`webkitRelativePath`]: https://developer.mozilla.org/en-US/docs/Web/API/File/webkitRelativePath
+/// The VFS path a picked file mounts at: its first folder becomes the virtual root.
+fn vfs_path(path: &str) -> String {
+    let mut parts = path.splitn(2, '/');
+    let folder = parts.next().unwrap_or_default();
+    match parts.next() {
+        Some(remaining) if !remaining.is_empty() => format!("/{}/{}", folder, remaining),
+        _ => format!("/{}", folder),
+    }
+}
+
 #[wasm_bindgen]
 pub fn mount_file(path: String, bytes: Vec<u8>) {
-    let mut parts = path.splitn(2, '/');
-    if let Some(folder) = parts.next() {
-        let remaining = parts.next().unwrap_or("");
-        let vfs_path = if remaining.is_empty() {
-            format!("/{}", folder)
-        } else {
-            format!("/{}/{}", folder, remaining)
-        };
-        osiris_vfs::mount(&vfs_path, bytes);
-    }
+    osiris_vfs::mount(&vfs_path(&path), bytes);
+}
+
+/// Mount a game file the page keeps outside wasm memory (browser only).
+///
+/// `path` is the file's path in the picked folder (e.g. `"PharaohData/Data/x.sg3"`) and is
+/// transformed the same way as [`mount_file`]. `len` is the file's size, which is all the
+/// store is told: the bytes stay where the browser has them and are read when the game
+/// opens the file (see [`lazy_read`]).
+#[wasm_bindgen]
+pub fn mount_lazy(path: String, len: f64) {
+    osiris_vfs::mount_lazy(&vfs_path(&path), len as u64);
 }
 
 /// Mount a single file at an exact VFS path (no transformation).

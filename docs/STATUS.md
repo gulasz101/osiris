@@ -61,6 +61,12 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   `not implemented on this platform` panic in the console.
 - **The main menu.** The player's folder is mounted and the game opens on its main menu
   (`web-start`). `OSIRIS_DATA=<folder> scripts/web-smoke.sh` prints `osiris web: main menu`.
+- **Your folder is remembered.** After the first load the page copies the game files into the
+  browser's own storage (the Origin Private File System: about 780 MB for a full install, with
+  PDFs, archives and installers left out) and writes a marker only once every file is there. On
+  the next visit the game starts from that copy with no folder picker (`web-remember`).
+  `OSIRIS_DATA=<folder> SMOKE_REMEMBER=1 scripts/web-smoke.sh` prints
+  `osiris web: remember OK (N files)`.
 - **Saves and settings stay across reloads.** They are kept in the browser's IndexedDB under
   `/user` (`web-persist`). `scripts/web-smoke.sh` prints `osiris web: persist OK`.
 - **Drag the folder onto the page.** A folder dragged from the file manager is read the same way
@@ -86,12 +92,13 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 
 ## 3. Missing or different from desktop
 
-- You choose your Pharaoh folder again after every page reload. The game files are read into
-  memory and not stored, only your saves and settings are.
 - Saves and settings live in the browser's storage, not in a folder you can open. Copying a save
   to another computer or to the desktop build is not possible yet.
 - The page has no command line. The only start option is `?mission=N`; `--data`, `--script` and
   `--screenshot` are desktop only, so the scripting and megacity tools do not apply.
+- The copy of the game files is a second copy of your install, about 780 MB of it. The browser may
+  throw it away when space runs low; the page then asks for your folder again. The "Forget game
+  files" button at the bottom right deletes it and reloads.
 - Sound starts after your first click, because the browser does not let a page play audio before
   that.
 - No threads. Autosaves and movie decoding run on the same thread as the game, so a movie may
@@ -109,7 +116,8 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 - `scripts/web-smoke.sh` builds the page and runs the browser smoke test. Its modes are the
   environment variables `OSIRIS_DATA` (game files), `SMOKE_MISSION=direct|menu`, `SMOKE_MOVIE=intro`,
   `SMOKE_ROOT` and `SMOKE_BASE` (serve another copy of the page, for example `out/site` under
-  `/osiris/`), and `SMOKE_TIMEOUT` (seconds, default 120). `SMOKE_WRAP=outer/inner` stages the game
+  `/osiris/`), `SMOKE_REMEMBER=1` (copy the files into browser storage, reload, and start with no
+  picker) and `SMOKE_TIMEOUT` (seconds, default 120). `SMOKE_WRAP=outer/inner` stages the game
   files two folders deeper and loads them through the page's own folder picker, as a GOG install
   sits; that run prints `osiris web: city started and ran 2 months: 1, 2`.
 - `scripts/no-game-files.sh` prints `no-game-files: OK` when no Pharaoh file is tracked in git.

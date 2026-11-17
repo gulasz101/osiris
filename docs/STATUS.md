@@ -77,6 +77,12 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   `osiris web: remember OK (N files)`.
 - **Saves and settings stay across reloads.** They are kept in the browser's IndexedDB under
   `/user` (`web-persist`). `scripts/web-smoke.sh` prints `osiris web: persist OK`.
+- **A save leaves the browser and comes back.** The Saves button lists every save under `/user`
+  with its family, file name, size and date, downloads one as a file, deletes one after asking,
+  and imports a file into the active family's saves folder (`web-saves-io`). A downloaded save is
+  a desktop Osiris save, so the desktop build loads it, and the other way round.
+  `OSIRIS_DATA=<folder> SMOKE_SAVES=1 scripts/web-smoke.sh` prints
+  `osiris web: saves export/import OK`.
 - **Drag the folder onto the page.** A folder dragged from the file manager is read the same way
   as one picked in the file dialog, and a folder that is not Pharaoh is refused with a message
   (`web-drop`). `scripts/web-smoke.sh` prints `osiris web: drop OK`.
@@ -105,8 +111,8 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 
 ## 3. Missing or different from desktop
 
-- Saves and settings live in the browser's storage, not in a folder you can open. Copying a save
-  to another computer or to the desktop build is not possible yet.
+- Saves and settings live in the browser's storage, not in a folder you can open. A save moves
+  in and out only through the Saves panel's Download and Import.
 - The page has no command line. The only start option is `?mission=N`; `--data`, `--script` and
   `--screenshot` are desktop only, so the scripting and megacity tools do not apply.
 - The copy of the game files is a second copy of your install, about 780 MB of it. The browser may
@@ -130,7 +136,8 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   environment variables `OSIRIS_DATA` (game files), `SMOKE_MISSION=direct|menu`, `SMOKE_MOVIE=intro`,
   `SMOKE_ROOT` and `SMOKE_BASE` (serve another copy of the page, for example `out/site` under
   `/osiris/`), `SMOKE_REMEMBER=1` (copy the files into browser storage, reload, and start with no
-  picker), `SMOKE_PICK=1` (hand the staged folder to the page's own folder picker, so the page's
+  picker), `SMOKE_SAVES=1` (start a city from the menu, save it, download it, delete it, import it
+  again and load it from the game's own load screen), `SMOKE_PICK=1` (hand the staged folder to the page's own folder picker, so the page's
   reading path and the loading bar run; not with `SMOKE_REMEMBER`) and `SMOKE_TIMEOUT` (seconds,
   default 120). `SMOKE_WRAP=outer/inner` stages the game
   files two folders deeper and loads them through the page's own folder picker, as a GOG install

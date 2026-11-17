@@ -1,7 +1,11 @@
 # web-remember Specification
 
 ## Purpose
-TBD - created by archiving change web-remember. Update Purpose after archive.
+
+Let a player load their Pharaoh install once. The page keeps a copy of the game files in the
+browser's own storage, so a later visit starts the game from that copy instead of asking for the
+folder again. The copy is the browser's, never ours: it stays on the player's computer and the
+player can delete it with one button.
 
 ## Requirements
 

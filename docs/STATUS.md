@@ -51,24 +51,27 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 - **The game runs in the page.** The program compiles for the browser and the page loads it
   without a panic (`web-compiles`, `web-page`). `scripts/web-smoke.sh` prints
   `osiris web: ready`.
-- **Files come from memory, not the disk.** Nothing in the browser build calls `std::fs`; the
-  game reads the player's folder through one file layer that the desktop build backs with real
-  files (`web-vfs-core`, `web-vfs-app`, `web-vfs-main`). `scripts/no-direct-fs.sh` prints OK, and
-  `OSIRIS_DATA=<folder> scripts/web-smoke.sh` mounts 1335 files and prints
+- **Files come from the player's folder, not the disk.** Nothing in the browser build calls
+  `std::fs`; the game reads the player's folder through one file layer that the desktop build
+  backs with real files (`web-vfs-core`, `web-vfs-app`, `web-vfs-main`). `scripts/no-direct-fs.sh`
+  prints OK, and `OSIRIS_DATA=<folder> scripts/web-smoke.sh` indexes 1335 files and prints
+  `osiris web: indexed 1335 files (775 MB) in 6318 ms`, then
   `osiris web: all essential game files mounted, starting game...`.
+- **A file is read when the game opens it, not before.** A pick, a drop or a restore only tells
+  the file layer each path and its size; the bytes move from the folder or browser storage into
+  wasm memory the first time the game reads that path, and a movie or a piece of sound is read
+  when it plays (`web-lazy`). That is what took the soak run's high water from 931 MB to 245 MB.
 - **No clock or thread call panics.** Frame timing and autosaves use `web_time`, and the browser
   never starts a thread (`web-time-threads`). The same smoke run reaches the menu with no
   `not implemented on this platform` panic in the console.
 - **The main menu.** The player's folder is mounted and the game opens on its main menu
   (`web-start`). `OSIRIS_DATA=<folder> scripts/web-smoke.sh` prints `osiris web: main menu`.
-- **A bar while the files load, and a faster start.** While the folder is read the page draws a
-  bar over the picture — `Reading game files: 412 / 1335 (31%)`, repainted at most every 100 ms —
-  and reads eight files at a time rather than one, which on a full install took the read from
-  about 4 seconds to about 2.7. Drag and drop and the copy in browser storage go through the
-  same bar, and the log says how long the start took (`web-progress`).
-  `OSIRIS_DATA=<folder> SMOKE_PICK=1 scripts/web-smoke.sh` prints
-  `osiris web: loading bar OK (...)` and `osiris web: menu after N ms`, and saves the picture it
-  took to `/tmp/osiris-web-loading.png`.
+- **No bar on the pick, a bar on the copy, and a timed start.** A pick or a drop reads nothing,
+  so the start is immediate and the page draws no bar for it; the bar now counts the one whole
+  read left, the copy into browser storage after the game has started — `Reading game files:
+  412 / 1335 (31%)`, repainted at most every 100 ms (`web-progress`). The log says how long the
+  start took: `OSIRIS_DATA=<folder> scripts/web-smoke.sh` prints
+  `osiris web: menu time OK (16254 ms from the pick to the main menu)`.
 - **Your folder is remembered.** After the first load the page copies the game files into the
   browser's own storage (the Origin Private File System: about 780 MB for a full install, with
   PDFs, archives and installers left out) and writes a marker only once every file is there. On
@@ -100,7 +103,7 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   month, and a custom map from `Maps/` plays six; the Mission Editor opens `Small Oasis.map`, paints
   tiles, saves it under a new name in `/user/maps` and goes back to the menu (`web-soak`).
   `OSIRIS_DATA=<folder> SMOKE_SOAK=1 scripts/web-smoke.sh` prints
-  `osiris web: soak OK (24 months, min fps 7, memory start 931 MB end 931 MB)`,
+  `osiris web: soak OK (24 months, min fps 6, memory start 245 MB end 245 MB)`,
   `osiris web: custom map soak OK (6 months on Small Oasis, ...)` and
   `osiris web: editor OK (Small Oasis edited and saved as /user/maps/Soak Edit.map)`.
 - **The movies play.** The intro and the periods' movies play in the page with their sound, and

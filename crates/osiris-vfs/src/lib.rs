@@ -250,8 +250,10 @@ pub fn len(path: impl AsRef<Path>) -> io::Result<u64> {
     let path = path.as_ref();
     FS.with(|fs| {
         fs.borrow()
-            .read(path.to_str().unwrap_or_default())
-            .map(|bytes| bytes.len() as u64)
+            // The length, not the bytes: a lazy game file's length is all the page told the
+            // store before the game started, and reading it here would copy the whole file
+            // into wasm memory for a number (`web-lazy`).
+            .len(path.to_str().unwrap_or_default())
             .ok_or(io::ErrorKind::NotFound.into())
     })
 }
@@ -274,6 +276,23 @@ pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
 #[cfg(target_arch = "wasm32")]
 pub fn mount(path: &str, bytes: Vec<u8>) {
     FS.with(|fs| fs.borrow_mut().mount(path, bytes));
+}
+
+/// Mount a game file whose bytes stay where the browser has them (browser only).
+///
+/// The page registers the file in `web/files.js` and then hands over its path and length
+/// here. Nothing is read until the game opens it ([`set_lazy_reader`]).
+#[cfg(target_arch = "wasm32")]
+pub fn mount_lazy(path: &str, len: u64) {
+    FS.with(|fs| fs.borrow_mut().mount_lazy(path, len));
+}
+
+/// Set the reader a lazy game file's bytes come from (browser only).
+///
+/// `web.rs` gives this the function that calls `osirisFiles.read` in `web/files.js`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_lazy_reader(reader: fn(&str) -> Option<Vec<u8>>) {
+    FS.with(|fs| fs.borrow_mut().set_lazy_reader(Some(reader)));
 }
 
 // ── Change hook (browser only) ─────────────────────────────────────

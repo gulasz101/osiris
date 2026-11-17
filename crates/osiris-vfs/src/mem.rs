@@ -16,13 +16,33 @@ mod change {
     }
 }
 
+/// The bytes of one entry: either in the store, or still where the browser holds them.
+#[derive(Debug, Clone)]
+enum Data {
+    /// The file's bytes, in memory.
+    Bytes(Arc<[u8]>),
+    /// A file the page keeps outside wasm memory: its length is known, and its bytes are
+    /// read from the browser's own file when the game asks for them, then dropped again.
+    Lazy { len: u64 },
+}
+
+impl Data {
+    /// The bytes in the store, or `None` for a file that still has to be read.
+    fn bytes(&self) -> Option<&Arc<[u8]>> {
+        match self {
+            Data::Bytes(bytes) => Some(bytes),
+            Data::Lazy { .. } => None,
+        }
+    }
+}
+
 /// A single entry in the in-memory file store.
 #[derive(Debug, Clone)]
 struct Entry {
     /// The original path as given at mount/write time (for DirEntry display).
     original: String,
-    /// The file bytes.
-    data: Arc<[u8]>,
+    /// The file's bytes, or the promise of them (see [`Data`]).
+    data: Data,
     /// Monotonically increasing write counter (used for modified timestamps).
     seq: u64,
 }
@@ -37,6 +57,8 @@ struct Entry {
 pub struct MemFs {
     /// File entries keyed by normalised path.
     files: BTreeMap<String, Entry>,
+    /// The reader a lazy entry asks for its bytes, set by the page ([`Self::set_lazy_reader`]).
+    lazy_reader: Option<fn(&str) -> Option<Vec<u8>>>,
     /// Directory keys (normalised paths).
     dirs: BTreeSet<String>,
     /// Monotonic counter for `modified` timestamps.
@@ -106,13 +128,43 @@ impl MemFs {
             norm.clone(),
             Entry {
                 original: path.to_owned(),
-                data: Arc::from(data.into_boxed_slice()),
+                data: Data::Bytes(Arc::from(data.into_boxed_slice())),
                 seq: self.seq,
             },
         );
         for d in parent_dirs(&norm) {
             self.dirs.insert(d);
         }
+    }
+
+    /// Mount a file the store does not hold the bytes of, only its length.
+    ///
+    /// This is what the browser uses: the page's `File` stays where the browser has it, on
+    /// disk, and [`Self::read`] asks the reader set with [`Self::set_lazy_reader`] for the
+    /// bytes when the game opens the file. They are handed over and then dropped, so a
+    /// session's memory holds only what the game is using at that moment.
+    pub fn mount_lazy(&mut self, path: &str, len: u64) {
+        let norm = normalise(path);
+        self.seq += 1;
+        self.files.insert(
+            norm.clone(),
+            Entry {
+                original: path.to_owned(),
+                data: Data::Lazy { len },
+                seq: self.seq,
+            },
+        );
+        for d in parent_dirs(&norm) {
+            self.dirs.insert(d);
+        }
+    }
+
+    /// Set the reader lazy entries ask for their bytes, or `None` for none.
+    ///
+    /// The reader is given the entry's original path, the one [`Self::mount_lazy`] was
+    /// called with, which is the key the page registered the file under.
+    pub fn set_lazy_reader(&mut self, reader: Option<fn(&str) -> Option<Vec<u8>>>) {
+        self.lazy_reader = reader;
     }
 
     /// Write bytes to a path (creates parent directories implicitly).
@@ -123,7 +175,7 @@ impl MemFs {
             norm.clone(),
             Entry {
                 original: path.to_owned(),
-                data: Arc::from(data.clone().into_boxed_slice()),
+                data: Data::Bytes(Arc::from(data.clone().into_boxed_slice())),
                 seq: self.seq,
             },
         );
@@ -148,8 +200,61 @@ impl MemFs {
     }
 
     /// Read bytes from the store. Returns `None` if missing.
+    ///
+    /// A lazy entry's bytes come from the reader set with [`Self::set_lazy_reader`] and are
+    /// not kept: a file the game reads twice is read from the browser twice. Without a
+    /// reader a lazy entry reads as missing, which is what callers already turn into
+    /// `NotFound`.
     pub fn read(&self, path: &str) -> Option<Arc<[u8]>> {
-        self.files.get(&normalise(path)).map(|e| e.data.clone())
+        let entry = self.files.get(&normalise(path))?;
+        match &entry.data {
+            Data::Bytes(bytes) => Some(bytes.clone()),
+            Data::Lazy { .. } => {
+                let reader = self.lazy_reader?;
+                let bytes = reader(&entry.original)?;
+                Some(Arc::from(bytes.into_boxed_slice()))
+            }
+        }
+    }
+
+    /// The length of a file in bytes, without reading a lazy entry's bytes.
+    pub fn len(&self, path: &str) -> Option<u64> {
+        let entry = self.files.get(&normalise(path))?;
+        match &entry.data {
+            Data::Bytes(bytes) => Some(bytes.len() as u64),
+            Data::Lazy { len } => Some(*len),
+        }
+    }
+
+    /// The bytes of an entry, reading them from the browser when it is a lazy one.
+    ///
+    /// Used wherever the store has to keep the bytes it was handed: a rename, which moves
+    /// the entry to a path the page has no file for, or a change recorded for `/user`.
+    fn entry_bytes(&self, entry: &Entry) -> Option<Arc<[u8]>> {
+        match &entry.data {
+            Data::Bytes(bytes) => Some(bytes.clone()),
+            Data::Lazy { .. } => {
+                let reader = self.lazy_reader?;
+                let bytes = reader(&entry.original)?;
+                Some(Arc::from(bytes.into_boxed_slice()))
+            }
+        }
+    }
+
+    /// An entry that keeps its bytes in the store: a lazy one is read first.
+    fn into_bytes(&self, entry: Entry) -> Entry {
+        match entry.data {
+            Data::Bytes(_) => entry,
+            Data::Lazy { .. } => {
+                let bytes = match self.entry_bytes(&entry) {
+                    Some(bytes) => Data::Bytes(bytes),
+                    // Without a reader there are no bytes to keep, so the entry stays lazy
+                    // and reads as missing from its new path.
+                    None => entry.data,
+                };
+                Entry { original: entry.original, data: bytes, seq: entry.seq }
+            }
+        }
     }
 
     /// Rename a file or directory. Returns false if source does not exist.
@@ -162,11 +267,13 @@ impl MemFs {
 
         if has_children {
             // Directory rename: move all files and directories under `from` to under `to`.
+            // A lazy file is read first, as a single-file rename does below: its new path
+            // has no file registered in the page.
             let children: Vec<(String, Entry)> = self
                 .files
                 .iter()
                 .filter(|(k, _)| is_under(k, &from_norm))
-                .map(|(k, v)| (k.clone(), (*v).clone()))
+                .map(|(k, v)| (k.clone(), self.into_bytes((*v).clone())))
                 .collect();
 
             // Record changes for watched files.
@@ -185,7 +292,9 @@ impl MemFs {
                             &old_key[from_norm.len()..]
                                 .replace('/', std::path::MAIN_SEPARATOR_STR)
                         );
-                        self.changes.push(Change::Put(new_original, entry.data.as_ref().to_vec()));
+                        if let Some(bytes) = entry.data.bytes() {
+                            self.changes.push(Change::Put(new_original, bytes.as_ref().to_vec()));
+                        }
                     }
                 }
             }
@@ -220,8 +329,10 @@ impl MemFs {
 
             true
         } else if self.files.contains_key(&from_norm) {
-            // Single-file rename (existing behaviour).
+            // Single-file rename (existing behaviour). A lazy entry is read first: the page
+            // registered its file under the old path, and the new path has none.
             let entry = self.files.remove(&from_norm).unwrap();
+            let entry = self.into_bytes(entry);
             self.seq += 1;
             self.files.insert(
                 to_norm.clone(),
@@ -241,7 +352,9 @@ impl MemFs {
                     self.changes.push(Change::Delete(entry.original));
                 }
                 if is_under(&to_norm, watch) {
-                    self.changes.push(Change::Put(to.to_owned(), entry.data.as_ref().to_vec()));
+                    if let Some(bytes) = entry.data.bytes() {
+                        self.changes.push(Change::Put(to.to_owned(), bytes.as_ref().to_vec()));
+                    }
                 }
             }
 
@@ -439,7 +552,126 @@ impl DirEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::thread_local;
     use std::time::{Duration, SystemTime};
+
+    thread_local! {
+        /// How many times `counting_reader` has been asked, on this test's own thread.
+        static LAZY_CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A reader for the lazy tests: it answers for one path only, in the spelling it was
+    /// mounted with, and gives a different answer each time, so a copy the store kept
+    /// would show.
+    fn counting_reader(path: &str) -> Option<Vec<u8>> {
+        if path != "/PharaohData/Data/Lazy.SG3" {
+            return None;
+        }
+        LAZY_CALLS.with(|calls| {
+            calls.set(calls.get() + 1);
+            Some(format!("read {}", calls.get()).into_bytes())
+        })
+    }
+
+    /// A test that counts reads starts from zero: the counter is this thread's own.
+    fn counting_fs() -> MemFs {
+        LAZY_CALLS.with(|calls| calls.set(0));
+        let mut fs = MemFs::default();
+        fs.set_lazy_reader(Some(counting_reader));
+        fs
+    }
+
+    #[test]
+    fn lazy_read_asks_the_reader_every_time() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        assert!(fs.is_file("/pharaohdata/data/lazy.sg3"));
+
+        // The reader is given the original path, whatever spelling the game looked up.
+        assert_eq!(fs.read("/pharaohdata/DATA/lazy.sg3").as_deref(), Some(&b"read 1"[..]));
+        // Nothing is kept: the second read asks again and gets the second answer.
+        assert_eq!(fs.read("/PharaohData/Data/Lazy.SG3").as_deref(), Some(&b"read 2"[..]));
+        assert_eq!(LAZY_CALLS.with(Cell::get), 2);
+    }
+
+    #[test]
+    fn lazy_entry_lists_with_its_length_and_asks_for_nothing() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 4242);
+
+        let entries = fs.read_dir("/PharaohData/Data");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_name(), "Lazy.SG3");
+        assert!(entries[0].is_file());
+        assert_eq!(entries[0].path, "/PharaohData/Data/Lazy.SG3");
+
+        // The length is the page's own number, and neither it nor the listing reads bytes.
+        assert_eq!(fs.len("/PharaohData/Data/Lazy.SG3"), Some(4242));
+        assert!(fs.modified_seq("/PharaohData/Data/Lazy.SG3").is_some());
+        assert_eq!(LAZY_CALLS.with(Cell::get), 0);
+    }
+
+    #[test]
+    fn lazy_without_a_reader_reads_as_missing() {
+        let mut fs = MemFs::default();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        assert!(fs.read("/PharaohData/Data/Lazy.SG3").is_none());
+        assert_eq!(fs.len("/PharaohData/Data/Lazy.SG3"), Some(6));
+    }
+
+    #[test]
+    fn lazy_with_a_reader_that_does_not_know_the_path_reads_as_missing() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Other.SG3", 6);
+        assert!(fs.read("/PharaohData/Data/Other.SG3").is_none());
+    }
+
+    #[test]
+    fn write_replaces_a_lazy_entry() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        fs.write("/PharaohData/Data/Lazy.SG3", b"mine".to_vec());
+
+        assert_eq!(fs.read("/PharaohData/Data/Lazy.SG3").as_deref(), Some(&b"mine"[..]));
+        assert_eq!(fs.len("/PharaohData/Data/Lazy.SG3"), Some(4));
+        assert_eq!(LAZY_CALLS.with(Cell::get), 0);
+    }
+
+    #[test]
+    fn remove_file_removes_a_lazy_entry() {
+        let mut fs = MemFs::default();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        assert!(fs.remove_file("/PharaohData/Data/Lazy.SG3"));
+        assert!(!fs.is_file("/PharaohData/Data/Lazy.SG3"));
+        assert!(fs.read("/PharaohData/Data/Lazy.SG3").is_none());
+    }
+
+    #[test]
+    fn rename_of_a_lazy_entry_moves_its_bytes() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        assert!(fs.rename("/PharaohData/Data/Lazy.SG3", "/PharaohData/Data/Moved.SG3"));
+
+        // The bytes were read once, by the rename: the new path has no file in the page,
+        // so both reads of it answer from the store.
+        assert_eq!(LAZY_CALLS.with(Cell::get), 1);
+        assert_eq!(fs.read("/PharaohData/Data/Moved.SG3").as_deref(), Some(&b"read 1"[..]));
+        assert_eq!(fs.read("/PharaohData/Data/Moved.SG3").as_deref(), Some(&b"read 1"[..]));
+        assert_eq!(LAZY_CALLS.with(Cell::get), 1);
+    }
+
+    #[test]
+    fn rename_of_a_folder_moves_its_lazy_files() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        assert!(fs.rename("/PharaohData/Data", "/PharaohData/Old Data"));
+
+        // The same rule as a single file: the bytes are read once, at the rename, because
+        // the page has no file registered under the folder's new path.
+        assert_eq!(fs.read("/PharaohData/Old Data/Lazy.SG3").as_deref(), Some(&b"read 1"[..]));
+        assert_eq!(LAZY_CALLS.with(Cell::get), 1);
+    }
 
     #[test]
     fn write_and_read() {

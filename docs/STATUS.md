@@ -134,6 +134,58 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   OpenGL land on the same 5 fps with the same `other`, the GPU is not what holds this run back.
   The earlier guess that headless Chrome has no GPU and spends ~150-175 ms software-drawing was
   wrong: it reports the Apple M1 in both runs, so the wait is the browser's own frame pacing.
+- **What fills the 183 ms: the browser's frame pacing, measured.** `SMOKE_TRACE=<file>` puts 20 s of
+  the running city at the fastest speed through CDP `Tracing` and writes a Chrome trace; nothing
+  in it is committed (`web-frame-trace`).
+  `SMOKE_TRACE=/tmp/osiris-trace.json SMOKE_GPU=1 OSIRIS_DATA=<folder> scripts/web-smoke.sh` prints
+  `osiris web: trace OK (20 s of the city, 37878 events)` next to the soak's own
+  `trace run min fps 5` and `frame ms sim 8.4 render 2.6 io 0.1 other 173.9`, and
+  `node scripts/trace-top.mjs /tmp/osiris-trace.json` reports:
+
+  ```
+  trace /tmp/osiris-trace.json
+  37878 events, 23912 complete slices, 20116.4 ms of trace
+  main thread 60212:259 (the most RunTask time), 7270 slices, 8661.5 ms of work
+
+  the ten biggest slices by total time on that thread:
+   total ms   count  name
+     2434.2    1631  RunTask
+     2387.1    1631  ThreadControllerImpl::RunTask
+     2116.3     617  FunctionCall
+     1364.2     108  FireAnimationFrame
+       40.4      56  RunMicrotasks
+       34.2      88  V8.HandleInterrupts
+       32.7      26  V8.StackGuard
+       32.0      64  Receive mojo reply
+       31.9     108  Commit
+       31.5       2  V8.InvokeApiInterruptCallbacks
+
+  rAF gap: mean 187.1 ms over 108 callbacks (median 201.8 ms, worst 220.8 ms, best 35.1 ms)
+  frame pacing: 1162 BeginFrame (one every 17.3 ms), 1054 DroppedFrame, 108 RequestMainThreadFrame (one every 187.1 ms)
+  ```
+
+  The table is nested: `RunTask` and `ThreadControllerImpl::RunTask` are the wrappers around
+  everything else, and our whole wasm frame sits under `FunctionCall` — 2.1 s of 20 s, 108 frames of
+  about 12.6 ms each. So the program works one frame in five and idles the rest. The frame pacing
+  line is the answer: `BeginFrame` arrives at 60 Hz, the browser throws away 1054 of the 1162
+  offered frames, and asks the main thread to draw only 108 times, once every 187.1 ms — the same
+  number as the rAF gap, as `other`, and as the frame time. The wait is inside the browser's
+  compositor; `PipelineReporter` blames `EndActivateToSubmitCompositorFrame` (mean 87 ms) for the
+  high-latency frames, which is a stage that never runs our code.
+
+  This host is the limit, not the game. A blank page in the same Chrome, with no wasm, no canvas and
+  no game files, gets a `requestAnimationFrame` every 176-195 ms in all five configurations tried
+  (Metal, software, headed, `--disable-frame-rate-limit`, the occlusion and backgrounding flags).
+  A display-less machine never offers a page more than about five frames a second, whatever that
+  page draws, which is why halving our per-frame work left `min fps` at 5.
+
+  Proposed fix: none in our code, and the tracing change deliberately stops here. The number to
+  trust is the rAF gap beside `other`, and both have to come from a machine with a real display
+  before anyone tunes the game against them; `trace-top.mjs` prints that gap, so a soak on a real
+  screen will say straight away whether the frame is ours (`FunctionCall` near the frame time) or
+  still the browser's (a gap far above `sim` plus `render`). Driving redraws from a timer instead of
+  `requestAnimationFrame` would lift the 5 fps here and draw off vsync on a player's machine, which
+  is a design decision for the plan, not a fix to slip into a tracing change.
 - **The movies play.** The intro and the periods' movies play in the page with their sound, and
   Escape skips one (`web-movies`).
   `OSIRIS_DATA=<folder> SMOKE_MOVIE=intro scripts/web-smoke.sh` prints

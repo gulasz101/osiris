@@ -1,10 +1,46 @@
 # Design: web-gpu-fps
 
 ### What the docs say (task 1.1)
-_Task 1.1 fills this in: the docs-mcp searches (library name and query) and what they said about
-Playwright `chromium.launch` (`headless`, `args`, `channel`), Chrome's `--use-angle=metal`,
-`--enable-gpu` and `--ignore-gpu-blocklist` on macOS, and wgpu `Adapter::get_info` /
-`AdapterInfo` (`name`, `backend`, `device_type`). Firecrawl only for what docs-mcp lacks; say so._
+
+**`wgpu` 30.0.1, docs-mcp**, queries `Adapter get_info request_adapter backend name` and `Backend
+enum BrowserWebGpu Gl variant`:
+- `Adapter::get_info(&self) -> AdapterInfo` (docs.rs/wgpu/30.0.1/wgpu/struct.Adapter.html).
+  `AdapterInfo` (docs.rs/wgpu/30.0.1/wgpu/struct.AdapterInfo.html) holds `name: String`,
+  `vendor: u32`, `device: u32`, `device_type`, `driver: String`, `driver_info: String`,
+  `backend: Backend`.
+- `Backend` (docs.rs/wgpu/30.0.1/wgpu/enum.Backend.html) is `Noop = 0, Vulkan = 1, Metal = 2,
+  Dx12 = 3, Gl = 4, BrowserWebGpu = 5`. The docs describe `Gl` as "OpenGL 3.3+ (Windows),
+  OpenGL ES 3.0+ (Linux, Android, MacOS via Angle), and WebGL2" and `BrowserWebGpu` as "WebGPU
+  in the browser", so `Gl -> WebGL2` and `BrowserWebGpu -> WebGPU` is the mapping the design
+  wants, straight from the enum's own description.
+- The page runs `Backends::GL` (`gfx.rs`), and `Backends::from_comma_list` only ever returns
+  `WEBGPU` on wasm over the WebGPU backend, which is why the label here is `WebGL2`.
+
+**`playwright`: not in docs-mcp.** The search answers `Library playwright not found in store.`
+So this came from Firecrawl (playwright.dev `docs/api/class-browsertype`, which shows
+`chromium.launch()` and little else) plus the installed copy's own types,
+`web/tests/node_modules/playwright-core/types/types.d.ts` 1.45.0, `interface LaunchOptions`:
+`args?: Array<string>` ("Use custom browser args at your own risk, as some of them may break
+Playwright functionality"), `channel?: string`, `executablePath?: string`, and `headless`
+(`false` makes `channel` unset). So `args` takes Chrome switches as written, and `headless: false`
+is the headed switch.
+
+**Chrome flags: not in docs-mcp either.** `mdn-web-apis` has no page on Chrome command-line
+switches (the search returned drag-and-drop and File API pages), so Firecrawl again:
+- Chromium's own `docs/gpu/using-gpu-hardware-in-headless-chrome.md`: "Headless Chrome can
+  utilize the local machine's GPU"; pass `--enable-gpu` to stop headless forcing software
+  rendering, otherwise it defers to the driver autodetection. That page's Linux notes are about
+  X11 and Vulkan, so it says nothing about macOS or Metal.
+- Nothing authoritative on `--ignore-gpu-blocklist` for macOS beyond the Chromium switches list
+  and a Stack Overflow thread ("Force headless chromium/chrome to use actual gpu instead of
+  Google SwiftShader"), where it did not help. It is a harmless extra flag, not the lever.
+
+**Measured on this host, with the probe below, not from docs:** Playwright's Chromium 1.45.0 on
+the M1 Air is *not* software rendering in headless mode. `--use-angle=metal` gives the WebGL2
+renderer `ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)`, plain
+`--use-angle=gl` gives `ANGLE (Apple, Apple M1, OpenGL 4.1)`, and SwiftShader appears in no
+combination. `navigator.gpu` is absent in all of them, so the WebGPU backend is not available to
+this Chrome and `WebGL2` is the only label this run can print.
 
 ## 1. The adapter line
 `gfx.rs` already logs `GPU: {:?}` of `a.get_info()` after `request_adapter`. Add, on

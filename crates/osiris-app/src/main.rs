@@ -38,6 +38,7 @@ mod overlay;
 mod mission_brief;
 mod progress;
 mod recording;
+mod soak;
 // The saved games the page can list, download and import: plain code, built for both targets
 // so its test runs in `cargo test` as well as in the browser build. Only the browser's page
 // calls it, so the desktop build would report it as unused.

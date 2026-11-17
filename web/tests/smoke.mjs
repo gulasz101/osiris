@@ -52,7 +52,13 @@ if (HEADED_RAW !== "" && !HEADED) {
     process.exit(1);
 }
 
-const DIRECT = MISSION_MODE === "direct";const MENU = MISSION_MODE === "menu" || SAVES || SOAK;
+// `SMOKE_TRACE=<file>` records a Chrome performance trace of 20 s of the running city at the
+// fastest speed, on the soak run's own path, and writes it to `<file>` (web-frame-trace). The
+// file belongs outside the repo: a trace is evidence for a report, never a committed file.
+const TRACE_FILE = (process.env.SMOKE_TRACE ?? "").trim();
+const TRACE = TRACE_FILE !== "";
+
+const DIRECT = MISSION_MODE === "direct";const MENU = MISSION_MODE === "menu" || SAVES || SOAK || TRACE;
 // `intro` plays the original's intro movie in the browser and skips it with Escape.
 const MOVIE_MODE = (process.env.SMOKE_MOVIE ?? "").trim();
 if (!["", "intro"].includes(MOVIE_MODE)) {
@@ -140,6 +146,11 @@ if (SYNCREAD_RAW !== "" && !SYNCREAD) {
 }
 if (SYNCREAD && (DIRECT || MENU || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE)) {
     console.error("FAIL: SMOKE_SYNCREAD runs on its own, with no SMOKE_MISSION, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT or SMOKE_PICK");
+    process.exit(1);
+}
+// A trace run walks the menu to a city the way the soak does, so it runs on its own too.
+if (TRACE && (MISSION_MODE !== "" || SAVES || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE || SYNCREAD)) {
+    console.error("FAIL: SMOKE_TRACE runs on its own, with no SMOKE_MISSION, SMOKE_SAVES, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT, SMOKE_PICK or SMOKE_SYNCREAD");
     process.exit(1);
 }
 
@@ -972,6 +983,148 @@ function soakSummary(months, rates, label) {
     const start = Math.round(months[0].bytes / (1024 * 1024));
     const end = Math.round(months[months.length - 1].bytes / (1024 * 1024));
     return { months: months.length, minFps: Math.min(...rates), start, end };
+}
+
+/**
+ * The trace categories of the DevTools Performance panel, with the V8 CPU profiler on, so the
+ * trace holds main-thread slices and JS samples (web-frame-trace design 2).
+ */
+const TRACE_CATEGORIES = [
+    "-*",
+    "devtools.timeline",
+    "v8.execute",
+    "disabled-by-default-devtools.timeline",
+    "disabled-by-default-devtools.timeline.frame",
+    "toplevel",
+    "blink.console",
+    "blink.user_timing",
+    "latencyInfo",
+    "disabled-by-default-devtools.timeline.stack",
+    "disabled-by-default-v8.cpu_profiler",
+    "disabled-by-default-v8.cpu_profiler.hires",
+].join(",");
+
+/** How many seconds of the running city the trace records. */
+const TRACE_SECONDS = 20;
+
+/** The city's own state as `debug_city()` reports it, parsed, or null when it is not there. */
+async function cityStateJson() {
+    try {
+        return JSON.parse(await cityState());
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Closes the mission's opening screens with Escape until the city is idle and running: the
+ * briefing reviewed covers the city when it starts, and a message stops the clock. The soak
+ * run dismisses the same screens, so the trace describes the same run.
+ */
+async function settleCity(maxTries = 12) {
+    for (let tries = 0; tries < maxTries; tries += 1) {
+        const state = await cityStateJson();
+        if (state && state.idle && !state.paused) return { ok: true, escapes: tries };
+        await page.keyboard.press("Escape");
+        await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    const state = await cityStateJson();
+    return { ok: Boolean(state && state.idle && !state.paused), escapes: maxTries };
+}
+
+/**
+ * SMOKE_TRACE=<file>: the soak run's setup (the menu walk to the first mission, the fastest
+ * speed, the app's own fps and frame lines) and then 20 s of the running city recorded as a
+ * Chrome performance trace, written to `<file>` (web-frame-trace design 2). The only work
+ * during the recording is Escape when a message has opened a screen, as the soak run does;
+ * nothing polls or evaluates in the page, so the harness cannot be what fills a gap.
+ */
+async function runTrace() {
+    if (!(await enterFirstMission("Trace"))) return;
+    // The click that starts the city is the last thing `enterFirstMission` does, and the app's
+    // line comes with it, so wait for the whole log: the line can already be there before the
+    // speed ladder below.
+    const started = await until(
+        () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: city ") && m.includes(" started")),
+        120_000,
+        500
+    );
+    if (!started) {
+        console.error("FAIL: the trace run never started the city");
+        process.exitCode = 1;
+        return;
+    }
+    const settled = await settleCity();
+    if (!settled.ok) {
+        console.error("FAIL: the city never became idle for the trace, state " + (await cityState()));
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: the city is running (" + settled.escapes + " Escapes to close its screens)");
+    // The app's own lines make the run comparable with the soak: min fps and the frame split.
+    await page.evaluate(() => set_soak(true));
+    const origin = await canvasOrigin();
+    await page.mouse.click(origin.left + 640, origin.top + 384);
+    for (let i = 0; i < SPEED_STEPS; i += 1) await page.keyboard.press("BracketRight");
+    // A moment for the first frames at the new speed to pass, so the trace is the steady state.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    // The frame lines this run produces after the trace starts.
+    const from = consoleMessages.length;
+
+    // The browser-level session is the one the Tracing domain lives on, and its events are the
+    // DevTools Performance panel's own (design 2).
+    const cdp = await browser.newBrowserCDPSession();
+    const events = [];
+    cdp.on("Tracing.dataCollected", ({ value }) => {
+        if (Array.isArray(value)) events.push(...value);
+    });
+    const complete = new Promise((resolve) => cdp.on("Tracing.tracingComplete", resolve));
+    await cdp.send("Tracing.start", { categories: TRACE_CATEGORIES, transferMode: "ReportEvents" });
+    console.log("osiris web: trace run started at the fastest game speed, recording " + TRACE_SECONDS + " s");
+    let escapes = 0;
+    for (let step = 0; step < TRACE_SECONDS / 2; step += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        // A month's message stops the city; the soak run closes it the same way, and the
+        // state read is one small task, not a frame's worth of work.
+        const state = await cityStateJson();
+        if (state && !state.idle) {
+            await page.keyboard.press("Escape");
+            escapes += 1;
+        }
+    }
+    await cdp.send("Tracing.end");
+    await complete;
+
+    if (events.length === 0) {
+        console.error("FAIL: the trace recorded no event");
+        process.exitCode = 1;
+        return;
+    }
+    fs.mkdirSync(path.dirname(path.resolve(TRACE_FILE)), { recursive: true });
+    fs.writeFileSync(TRACE_FILE, JSON.stringify(events));
+    const bytes = fs.statSync(TRACE_FILE).size;
+
+    // The fps and frame lines the same run produced, so the trace and the timers describe one run.
+    await until(() => soakFps(from).length > 0, 25_000, 500);
+    await until(() => soakSplits(from).length > 0, 25_000, 500);
+    const rates = soakFps(from);
+    const splits = soakSplits(from);
+    if (rates.length > 0) {
+        console.log("osiris web: trace run min fps " + Math.min(...rates) + " over " + rates.length + " window(s)");
+    }
+    if (splits.length > 0) console.log("osiris web: " + soakSplitSummary(splits));
+
+    const panic = panicLine();
+    if (panic) {
+        console.error("FATAL: wasm panic detected: " + panic);
+        process.exitCode = 1;
+        return;
+    }
+    console.log(
+        "osiris web: trace written to " + TRACE_FILE + " (" + events.length + " events, " +
+        Math.round(bytes / (1024 * 1024)) + " MB, " + escapes + " Escapes)"
+    );
+    console.log("osiris web: trace OK (" + TRACE_SECONDS + " s of the city, " + events.length + " events)");
 }
 
 /**
@@ -2255,6 +2408,11 @@ async function run() {
 
             if (INTRO) {
                 await runIntroMovie();
+                return;
+            }
+
+            if (TRACE) {
+                await runTrace();
                 return;
             }
 

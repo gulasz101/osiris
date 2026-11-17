@@ -6,9 +6,16 @@ Look up first in docs-mcp (library `mdn-web-apis`): `performance.now`, `requestA
 
 ### What the docs say (task 1.1)
 
-- **`mdn-web-apis`** (docs-mcp) holds only part of MDN: searches for `performance.now` and
-  `requestAnimationFrame` came back with unrelated pages (`File.lastModified`, the drag-and-drop
-  guide). So the three MDN pages were read with the `web-search` skill (Firecrawl), and the
+- **`mdn-web-apis`** (docs-mcp), searched again after the review asked for it: the index has no
+  `Performance.now()` page and no "Synchronous and asynchronous requests" page. `performance.now
+  high resolution timestamp` returned `IndexedDB_API`, `File.lastModified` twice, `DataTransfer
+  .clearData` and the `File_System_API`; `Synchronous and asynchronous requests XMLHttpRequest`
+  returned the File API upload guide, `Origin_private_file_system` ("Web Workers don't block the
+  main thread, which means you can use the synchronous file access APIs in this context"), the
+  `File_System_API` and `File_API` ("a synchronous version, available only in web workers, is
+  provided by the `FileReaderSync` interface"). Both are about the main thread being the one that
+  blocks, which is this task's problem, and both put the fix on a worker, which is out of scope.
+  So the three MDN pages themselves were read with the `web-search` skill (Firecrawl), and the
   quotes below are from those pages:
   - `Performance.now()`: "returns a high resolution timestamp in milliseconds", a
     `DOMHighResTimeStamp` with "up to microsecond precision", relative to `timeOrigin` on a
@@ -28,7 +35,11 @@ Look up first in docs-mcp (library `mdn-web-apis`): `performance.now`, `requestA
   still spent going through JS". That last part matters: timing a frame costs a JS call per
   reading, so the split reads the clock a handful of times per frame, not once per part of the
   draw.
-- **`wgpu` 30.0.1** (docs-mcp): `Features::TIMESTAMP_QUERY`,
+- **`wgpu` 30.0.1** (docs-mcp), `timestamp query`, searched again after the review: the top hit is
+  `struct.FeaturesWGPU` ("This is a native only feature with a proposal for the web"), then
+  `enum.QueryType` ("A timestamp query records a GPU-timestamp value at which a certain command
+  started or finished executing", scaled by `Queue::get_timestamp_period()`), the pass timestamp
+  writes and `PresentationTimestamp` (a native struct). No web path. `Features::TIMESTAMP_QUERY`,
   `TIMESTAMP_QUERY_INSIDE_ENCODERS` and `TIMESTAMP_QUERY_INSIDE_PASSES` are each "a native only
   feature with a proposal for the web", and `PresentationTimestamp` is a native struct. So the
   browser build cannot measure GPU time; the `render` part is CPU time spent building and

@@ -38,6 +38,9 @@ scripts/check-site.sh "$tmp/good" | grep -q "check-site: OK" || {
 rm -rf "$tmp"
 
 
+echo "== progress test"
+node web/tests/progress-test.mjs
+
 echo "== folder test"
 node web/tests/folder-test.mjs
 

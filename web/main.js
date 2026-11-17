@@ -2,16 +2,21 @@ import init, {
     debug_menu_buttons,
     debug_write_user,
     debug_read_user,
+    delete_save,
+    list_saves,
     mount_exact,
     mount_file,
     mount_user_file,
+    read_save,
     set_pick_time,
     start_game,
+    write_save,
 } from "./pkg/osiris.js";
 import { filesFromDrop, filesFromInput, filesUnder, findGameRoot } from "./folder.js";
 import { fitSize } from "./fit.js";
 import { forget as forgetGameFiles, restore as restoreGameFiles, save as saveGameFiles } from "./opfs.js";
 import { createBar, readAll } from "./progress.js";
+import { download, formatDate, formatSize, saveName, tooBig } from "./saves.js";
 
 let busy = false;
 
@@ -161,6 +166,163 @@ function togglePage() {
 
 if (pageButton) {
     pageButton.addEventListener("click", togglePage);
+}
+
+// ── The Saves panel: list, download, delete and import the saved games ──
+
+const savesButton = document.getElementById("saves-button");
+const savesPanel = document.getElementById("saves");
+const savesRows = document.getElementById("saves-rows");
+const savesStatus = document.getElementById("saves-status");
+const savesClose = document.getElementById("saves-close");
+const importInput = document.getElementById("import");
+
+/** The message of whatever was thrown: a wasm error is a string, not an `Error`. */
+function errorText(err) {
+    return err && err.message ? err.message : String(err);
+}
+
+/** A line of feedback in the panel. */
+function savesSay(text) {
+    if (savesStatus) savesStatus.textContent = text;
+}
+
+/** One text cell of a save's row. */
+function cell(row, text) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    row.appendChild(td);
+    return td;
+}
+
+/** One button cell of a save's row. */
+function buttonCell(row, label, className, onClick) {
+    const td = document.createElement("td");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    td.appendChild(button);
+    row.appendChild(td);
+    return button;
+}
+
+/** Download one save: its bytes out of the game's own store, handed to the browser. */
+function downloadSave(entry) {
+    try {
+        const bytes = read_save(entry.path);
+        download(new Blob([bytes]), entry.name);
+        savesSay("Downloaded " + entry.name + " (" + formatSize(bytes.length) + ")");
+    } catch (err) {
+        console.error("osiris web: downloading " + entry.path + " failed", err);
+        savesSay("Could not download " + entry.name + ": " + errorText(err));
+    }
+}
+
+/** Delete one save, after asking: the game's own Load Saved Game list drops it too. */
+async function deleteSave(entry) {
+    if (!confirm("Delete " + entry.name + "? This cannot be undone.")) return;
+    try {
+        delete_save(entry.path);
+        // The panel lists the game's store, not IndexedDB, but the write has to land before
+        // the smoke run compares the two.
+        await osirisStore.idle();
+        await fillSaves();
+        savesSay("Deleted " + entry.name);
+    } catch (err) {
+        console.error("osiris web: deleting " + entry.path + " failed", err);
+        savesSay("Could not delete " + entry.name + ": " + errorText(err));
+    }
+}
+
+/**
+ * Fill the panel's rows: the list from the game's store (`list_saves`), the dates from
+ * browser storage, where each `/user` write keeps its time.
+ */
+async function fillSaves() {
+    if (!savesRows) return;
+    savesRows.textContent = "";
+    let entries = [];
+    try {
+        entries = JSON.parse(list_saves());
+    } catch (err) {
+        console.error("osiris web: the save list is not JSON", err);
+        savesSay("Could not read the list of saves: " + errorText(err));
+        return;
+    }
+    let dates = {};
+    try {
+        dates = await osirisStore.dates();
+    } catch (err) {
+        // Without usable storage the saves still list; they just show no date.
+        console.warn("osiris web: the save times could not be read", err);
+    }
+    for (const entry of entries) {
+        const row = document.createElement("tr");
+        row.dataset.path = entry.path;
+        cell(row, entry.family || "—");
+        cell(row, entry.name);
+        cell(row, formatSize(entry.size));
+        cell(row, formatDate(dates[entry.path]));
+        buttonCell(row, "Download", "save-download", () => downloadSave(entry));
+        buttonCell(row, "Delete", "save-delete", () => deleteSave(entry));
+        savesRows.appendChild(row);
+    }
+    if (entries.length === 0) {
+        savesSay("No saved games yet. Save from the game's own menu, or import one below.");
+    } else {
+        savesSay(entries.length === 1 ? "1 save" : entries.length + " saves");
+    }
+}
+
+/** Open the panel and fill it, on every open: the game may have saved since last time. */
+async function openSaves() {
+    if (!savesPanel) return;
+    savesPanel.hidden = false;
+    await fillSaves();
+}
+
+function closeSaves() {
+    if (savesPanel) savesPanel.hidden = true;
+}
+
+if (savesButton) {
+    savesButton.addEventListener("click", openSaves);
+}
+if (savesClose) {
+    savesClose.addEventListener("click", closeSaves);
+}
+
+// An imported save goes in through `write_save`, the same `/user` write path a save made
+// by the game takes, so browser storage keeps it and Load Saved Game lists it.
+if (importInput) {
+    importInput.addEventListener("change", async () => {
+        const file = importInput.files && importInput.files[0];
+        if (!file) return;
+        const name = saveName(file.name);
+        if (name === null) {
+            savesSay(file.name + " is not a plain file name; choose an .osiris file");
+            importInput.value = "";
+            return;
+        }
+        if (tooBig(file.size)) {
+            savesSay(file.name + " is " + formatSize(file.size) + "; the page imports up to 20 MB");
+            importInput.value = "";
+            return;
+        }
+        try {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            write_save(name, bytes);
+            await osirisStore.idle();
+            await fillSaves();
+            savesSay("Imported " + name + " (" + formatSize(bytes.length) + ")");
+        } catch (err) {
+            console.error("osiris web: importing " + name + " failed", err);
+            savesSay("Could not import " + name + ": " + errorText(err));
+        }
+        importInput.value = "";
+    });
 }
 
 /** Put the start screen back and say what went wrong, leaving the page usable. */

@@ -61,6 +61,27 @@
         }
         #progress-fill { width: 0; height: 100%; background: #ffd700; }
         #progress-text { color: #ffd700; }
+        /* The Saves panel covers everything, over the canvas and the progress bar, so the
+           player can reach it while the game is playing. `[hidden]` is spelled out again,
+           as it is for the start page. */
+        #saves {
+            position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column;
+            gap: 0.7em; padding: 1.2em; overflow: auto;
+            background: rgba(26, 26, 46, 0.95);
+        }
+        #saves[hidden] { display: none; }
+        #saves h2 { font-size: 1.2rem; color: #ffd700; }
+        #saves table { border-collapse: collapse; width: 100%; }
+        #saves th, #saves td { padding: 0.3em 0.6em; text-align: left; font-size: 0.9rem; }
+        #saves th { color: #ffd700; font-weight: normal; }
+        #saves tr:nth-child(even) td { background: rgba(255, 255, 255, 0.05); }
+        #saves button {
+            padding: 0.1em 0.5em; font-size: 0.8rem; color: #ddd;
+            background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 0.3em; cursor: pointer;
+        }
+        #saves button:hover { color: #1a1a2e; background: #ffd700; }
+        #saves-status { color: #ffd700; min-height: 1.2em; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -78,8 +99,22 @@
         <p id="progress-text"></p>
     </div>
     <div id="controls" hidden>
+        <button id="saves-button">Saves</button>
         <button id="fullscreen">Fullscreen</button>
         <button id="page">Page</button>
+    </div>
+    <div id="saves" hidden>
+        <h2>Saves</h2>
+        <table>
+            <thead>
+                <tr><th>Family</th><th>File</th><th>Size</th><th>Date</th><th></th><th></th></tr>
+            </thead>
+            <tbody id="saves-rows"></tbody>
+        </table>
+        <p id="saves-status"></p>
+        <p>Import a save into this family's saves folder:
+            <input type="file" id="import" accept=".osiris" /></p>
+        <button id="saves-close">Close</button>
     </div>
     <script src="store.js"></script>
     <script src="audio.js"></script>

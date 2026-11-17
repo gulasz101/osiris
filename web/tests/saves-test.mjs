@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
+import { MAX_SAVE_BYTES, download, formatDate, formatSize, saveName, tooBig } from "../saves.js";
+
 let failures = 0;
 
 function check(name, actual, expected) {
@@ -146,6 +148,84 @@ await store.del(SAVE);
 checkTrue("delete removes the file", !data.has(SAVE));
 check("the list after the delete", (await store.loadAll()).map(([path]) => path).sort(),
     [OLD_SAVE, SETTINGS].sort());
+
+// ── The row helpers ────────────────────────────────────────────────
+
+check("a few hundred bytes", formatSize(812), "812 B");
+check("nothing", formatSize(0), "0 B");
+check("a whole kilobyte", formatSize(1024), "1.0 kB");
+check("the design's example", formatSize(188723), "184.3 kB");
+check("a few megabytes", formatSize(3 * 1024 * 1024), "3.0 MB");
+
+// A local time, built from local parts, so the test does not care about the time zone.
+const at2 = new Date(2026, 10, 17, 10, 4).getTime();
+check("the design's date", formatDate(at2), "2026-11-17 10:04");
+check("a single-digit month and hour keep their zero", formatDate(new Date(2026, 0, 5, 9, 7).getTime()),
+    "2026-01-05 09:07");
+check("no time", formatDate(undefined), "—");
+check("a zero time", formatDate(0), "—");
+check("a nonsense time", formatDate(NaN), "—");
+
+check("a plain name", saveName("Nubt.osiris"), "Nubt.osiris");
+check("a name with spaces around it", saveName("  Nubt.osiris "), "Nubt.osiris");
+check("a name climbing out", saveName("../Nubt.osiris"), null);
+check("a name inside a path", saveName("sub/Nubt.osiris"), null);
+check("a Windows path", saveName("sub\\Nubt.osiris"), null);
+check("a name with a dot-dot run", saveName("a..b.osiris"), null);
+check("an empty name", saveName(""), null);
+check("no name at all", saveName(null), null);
+
+check("a small file", tooBig(4096), false);
+check("exactly twenty megabytes", tooBig(MAX_SAVE_BYTES), false);
+check("a byte over", tooBig(MAX_SAVE_BYTES + 1), true);
+
+// ── The download, over fakes ──────────────────
+
+/** A `document` that records the `<a>` it makes, and a `URL` that records both calls. */
+function fakes() {
+    const appended = [];
+    const links = [];
+    const created = [];
+    const revoked = [];
+    const document = {
+        body: { appendChild: (el) => appended.push(el) },
+        createElement(tag) {
+            const link = {
+                tag,
+                href: "",
+                download: "",
+                hidden: false,
+                clicks: 0,
+                click() { this.clicks += 1; },
+                remove() {
+                    const i = appended.indexOf(this);
+                    if (i >= 0) appended.splice(i, 1);
+                },
+            };
+            links.push(link);
+            return link;
+        },
+    };
+    const url = {
+        createObjectURL(blob) { created.push(blob); return "blob:osiris-" + created.length; },
+        revokeObjectURL(href) { revoked.push(href); },
+    };
+    return { document, url, appended, links, created, revoked };
+}
+
+const fake = fakes();
+const blob = new Blob(["a save"]);
+const href = download(blob, "Nubt.osiris", { document: fake.document, url: fake.url, delay: 0 });
+check("one link made", fake.links.length, 1);
+check("the link is an anchor", fake.links[0].tag, "a");
+check("the link carries the object URL", fake.links[0].href, href);
+check("the link is named after the save", fake.links[0].download, "Nubt.osiris");
+checkTrue("the blob is the one handed over", fake.created[0] === blob);
+check("the link is clicked once", fake.links[0].clicks, 1);
+check("the link is not left on the page", fake.appended.length, 0);
+check("the URL is not released before the browser starts", fake.revoked, []);
+await new Promise((resolve) => setTimeout(resolve, 5));
+check("the URL is released once the download started", fake.revoked, [href]);
 
 if (failures > 0) {
     console.error("saves-test: " + failures + " failed");

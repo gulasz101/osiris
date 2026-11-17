@@ -35,6 +35,23 @@ scripts/check-site.sh "$tmp/good" | grep -q "check-site: OK" || {
   echo "check-site.sh rejected a clean site folder"
   exit 1
 }
+# A page script importing a script that is not in the folder must be caught.
+mkdir -p "$tmp/imports"
+: > "$tmp/imports/index.html"
+printf 'import { gone } from "./gone.js";\n' > "$tmp/imports/a.js"
+if scripts/check-site.sh "$tmp/imports" > "$tmp/imports.txt" 2>&1; then
+  echo "check-site.sh passed a folder with a missing imported script"
+  exit 1
+fi
+grep -q "check-site: missing gone.js (imported by a.js)" "$tmp/imports.txt" || {
+  echo "check-site.sh did not name the missing imported script"
+  exit 1
+}
+: > "$tmp/imports/gone.js"
+scripts/check-site.sh "$tmp/imports" | grep -q "check-site: OK" || {
+  echo "check-site.sh rejected a folder whose imports all resolve"
+  exit 1
+}
 rm -rf "$tmp"
 
 

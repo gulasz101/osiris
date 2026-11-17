@@ -18,19 +18,12 @@ if [ ! -d "$dir" ]; then
   exit 1
 fi
 
-# The only files the site may hold: the page, its eight scripts, the wasm build
-# and an empty .nojekyll so GitHub Pages serves the files verbatim.
+# The only files the site may hold: the page, a script next to it, the wasm build
+# and an empty .nojekyll so GitHub Pages serves the files verbatim. Any *.js in
+# the top folder is a page script, because pages-site.sh copies web/*.js.
 allowed="
 .nojekyll
 index.html
-main.js
-fit.js
-folder.js
-store.js
-audio.js
-opfs.js
-progress.js
-saves.js
 pkg/osiris.js
 pkg/osiris_bg.wasm
 "
@@ -40,7 +33,8 @@ game_pattern='\.(sg2|sg3|555|map|sav|pak|bik|smk|wav|mp3|exe|zip)$'
 big_limit=52428800 # 50 MB, our own early warning; Pages allows 100 MB per file
 
 list=$(mktemp "${TMPDIR:-/tmp}/check-site.XXXXXX")
-trap 'rm -f "$list"' EXIT
+imports=$(mktemp "${TMPDIR:-/tmp}/check-site-imports.XXXXXX")
+trap 'rm -f "$list" "$imports"' EXIT
 
 # Paths relative to DIR, so the folder itself never shows up.
 find "$dir" -type f | sed "s|^$dir/||" | sort > "$list"
@@ -49,7 +43,8 @@ failed=0
 while IFS= read -r rel; do
     [ -n "$rel" ] || continue
 
-    if ! printf '%s\n' "$allowed" | grep -qxF "$rel"; then
+    if ! printf '%s\n' "$allowed" | grep -qxF "$rel" &&
+        ! printf '%s\n' "$rel" | grep -qxE '[A-Za-z0-9._-]+\.js'; then
         echo "check-site: $rel is not a page file"
         failed=1
     fi
@@ -66,6 +61,21 @@ while IFS= read -r rel; do
         failed=1
     fi
 done < "$list"
+
+# Every script the page imports must sit next to it. A missing one stops the page
+# before it draws anything, which is how a missing files.js broke the live site.
+for js in "$dir"/*.js; do
+    [ -f "$js" ] || continue
+    base=${js##*/}
+    grep -oE '(from|import) "\./[^"]+"' "$js" | sed 's/^[a-z]* "\.\///; s/"$//' | sort -u > "$imports"
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        if [ ! -f "$dir/$target" ]; then
+            echo "check-site: missing $target (imported by $base)"
+            failed=1
+        fi
+    done < "$imports"
+done
 
 if [ "$failed" -ne 0 ]; then
     echo "check-site: FAILED"

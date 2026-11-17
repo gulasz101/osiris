@@ -4,96 +4,276 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Osiris: Pharaoh in your browser</title>
+    <link rel="preload" href="assets/title.jpg" as="image" />
     <style>
+        :root {
+            --gold: #e8c46a;
+            --gold-bright: #ffdf8a;
+            --gold-deep: #a8792a;
+            --ink: #120d07;
+            --lapis: #14213d;
+            --papyrus: #f1e3c0;
+            --serif: "Cinzel", "Trajan Pro", "Optima", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+        }
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { height: 100%; font-family: sans-serif; background: #1a1a2e; color: #eee; }
-        /* The game's canvas fills the window; the start page sits over it until the game
+        html, body {
+            height: 100%; font-family: "Optima", "Segoe UI", "Helvetica Neue", sans-serif;
+            background: var(--ink); color: var(--papyrus);
+        }
+        button, label.btn { font: inherit; }
+        /* The game's canvas fills the window; the title screen sits over it until the game
            starts. `[hidden]` has to be spelled out: `display: block` here would otherwise
            beat the browser's own rule for the hidden attribute. */
         #osiris { display: block; background: #000; }
         #osiris[hidden] { display: none; }
+
+        /* ── Buttons, the same on every screen ── */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.5em;
+            min-width: 16rem; padding: 0.75em 1.6em; cursor: pointer; user-select: none;
+            font-family: var(--serif); font-size: 1rem; letter-spacing: 0.12em; text-transform: uppercase;
+            color: var(--papyrus); background: rgba(10, 14, 28, 0.55);
+            border: 1px solid rgba(232, 196, 106, 0.55); border-radius: 2px;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+            transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+        }
+        .btn:hover, .btn:focus-visible {
+            color: var(--ink); background: var(--gold); border-color: var(--gold-bright);
+            outline: none; transform: translateY(-1px);
+        }
+        .btn.primary {
+            color: var(--ink); border-color: var(--gold-bright);
+            background: linear-gradient(180deg, var(--gold-bright), var(--gold) 55%, var(--gold-deep));
+            box-shadow: 0 4px 18px rgba(232, 196, 106, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        }
+        .btn.primary:hover, .btn.primary:focus-visible { filter: brightness(1.08); }
+        .btn.subtle {
+            min-width: 0; padding: 0.4em 0.9em; font-size: 0.72rem;
+            background: transparent; border-color: rgba(241, 227, 192, 0.25); color: rgba(241, 227, 192, 0.7);
+        }
+        .btn[hidden], label.btn[hidden] { display: none; }
+        .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+        /* The folder input is there for the label and for drag and drop tests; it is
+           hidden from sight but stays in the page so the picker still opens. */
+        .visually-hidden {
+            position: absolute; width: 1px; height: 1px; overflow: hidden;
+            clip: rect(0 0 0 0); white-space: nowrap; opacity: 0;
+        }
+
+        /* ── The title screen ── */
         #start {
-            display: flex; flex-direction: column; align-items: center;
-            justify-content: center; min-height: 100vh; gap: 1em; text-align: center;
+            position: relative; display: flex; align-items: center; min-height: 100vh;
+            padding: 4vh 6vw; overflow: hidden;
+            background:
+                linear-gradient(90deg, rgba(8, 10, 22, 0.88) 0%, rgba(8, 10, 22, 0.6) 32%, rgba(8, 10, 22, 0) 62%),
+                linear-gradient(0deg, rgba(8, 10, 22, 0.75) 0%, rgba(8, 10, 22, 0) 30%),
+                url("assets/title.jpg") center / cover no-repeat, var(--lapis);
         }
-        h1 { font-size: 1.8rem; }
-        p { max-width: 40ch; opacity: 0.85; }
-        #status { margin-top: 1em; color: #ffd700; min-height: 1.5em; }
-        #start.drag { outline: 3px dashed #ffd700; }
-        /* The start page covers the game once the game is running, so the corner link can
-           bring it back over the top. */
-        #start.over-game {
-            position: fixed; inset: 0; z-index: 1; background: #1a1a2e;
-            overflow: auto; padding: 1em;
+        #start.drag::after {
+            content: "Drop the Pharaoh folder"; position: absolute; inset: 1.2rem;
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--serif); font-size: 1.6rem; letter-spacing: 0.15em; color: var(--gold-bright);
+            border: 3px dashed var(--gold); border-radius: 6px; background: rgba(8, 10, 22, 0.6);
+            pointer-events: none;
         }
-        /* The game's own controls, small and out of the way, over the canvas. */
+        /* The title screen comes back over the running game from the Page button. */
+        #start.over-game { position: fixed; inset: 0; z-index: 1; overflow: auto; }
+        .title-panel {
+            position: relative; display: flex; flex-direction: column; align-items: flex-start;
+            gap: 1.1rem; max-width: 34rem; animation: rise 0.9s ease-out both;
+        }
+        .kicker {
+            font-family: var(--serif); font-size: 0.85rem; letter-spacing: 0.45em;
+            text-transform: uppercase; color: var(--gold);
+        }
+        h1 {
+            font-family: var(--serif); font-weight: 600; line-height: 0.95;
+            font-size: clamp(3.5rem, 9vw, 7rem); letter-spacing: 0.08em; text-transform: uppercase;
+            background: linear-gradient(180deg, #fff3c9 0%, var(--gold-bright) 35%, var(--gold) 60%, var(--gold-deep) 100%);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+            filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.6));
+        }
+        .rule {
+            width: 14rem; height: 1px;
+            background: linear-gradient(90deg, var(--gold), rgba(232, 196, 106, 0));
+        }
+        .tagline { font-size: 1.15rem; max-width: 30ch; color: rgba(241, 227, 192, 0.92); text-shadow: 0 1px 4px #000; }
+        #menu { display: flex; flex-direction: column; align-items: stretch; gap: 0.7rem; margin-top: 0.6rem; }
+        #menu .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+        #found {
+            font-size: 0.95rem; color: var(--gold-bright); min-height: 1.3em;
+            text-shadow: 0 1px 3px #000;
+        }
+        #status { color: #ffb38a; min-height: 1.3em; max-width: 38ch; text-shadow: 0 1px 3px #000; }
+        .fine { font-size: 0.82rem; max-width: 42ch; color: rgba(241, 227, 192, 0.65); }
+        .credits {
+            position: absolute; right: 1.2rem; bottom: 0.9rem; font-size: 0.72rem;
+            color: rgba(241, 227, 192, 0.55); text-align: right; text-shadow: 0 1px 3px #000;
+        }
+        .credits a { color: inherit; }
+        @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+        /* ── The loading screen, from Enter until the game draws its first screen ── */
+        #loading {
+            position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 1.4rem; text-align: center;
+            background:
+                radial-gradient(ellipse at center, rgba(8, 10, 22, 0.35) 0%, rgba(8, 10, 22, 0.88) 70%),
+                url("assets/archive.jpg") center / cover no-repeat, var(--ink);
+            transition: opacity 0.6s ease;
+        }
+        #loading[hidden] { display: none; }
+        #loading.fade { opacity: 0; pointer-events: none; }
+        .sun {
+            width: 5.5rem; height: 5.5rem; border-radius: 50%; position: relative;
+            background: radial-gradient(circle, var(--gold-bright) 0%, var(--gold) 45%, var(--gold-deep) 70%, transparent 72%);
+            box-shadow: 0 0 40px rgba(255, 210, 120, 0.55);
+            animation: glow 2.4s ease-in-out infinite;
+        }
+        .sun::before {
+            content: ""; position: absolute; inset: -0.9rem; border-radius: 50%;
+            border: 2px solid transparent; border-top-color: var(--gold); border-right-color: rgba(232, 196, 106, 0.4);
+            animation: spin 1.4s linear infinite;
+        }
+        #loading h2 {
+            font-family: var(--serif); font-weight: 600; font-size: clamp(1.6rem, 4vw, 2.6rem);
+            letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold-bright);
+            text-shadow: 0 2px 10px #000;
+        }
+        #loading-text { font-size: 1.05rem; color: var(--papyrus); text-shadow: 0 1px 4px #000; min-height: 1.4em; }
+        #loading-flavour { font-style: italic; font-size: 0.9rem; color: rgba(241, 227, 192, 0.7); min-height: 1.3em; }
+        .ticker {
+            width: min(26rem, 70vw); height: 3px; overflow: hidden; border-radius: 2px;
+            background: rgba(232, 196, 106, 0.2);
+        }
+        .ticker::before {
+            content: ""; display: block; width: 35%; height: 100%;
+            background: linear-gradient(90deg, transparent, var(--gold-bright), transparent);
+            animation: slide 1.6s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes glow { 50% { box-shadow: 0 0 70px rgba(255, 210, 120, 0.85); } }
+        @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+
+        /* ── The game's own controls, small and out of the way, over the canvas ── */
         #controls {
             position: fixed; right: 0.75em; bottom: 0.75em; z-index: 2;
             display: flex; gap: 0.4em;
         }
         #controls[hidden] { display: none; }
         #controls button {
-            padding: 0.2em 0.6em; font-size: 0.75rem; color: #ddd;
-            background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 0.3em; cursor: pointer;
+            padding: 0.25em 0.7em; font-size: 0.75rem; letter-spacing: 0.05em; color: var(--papyrus);
+            background: rgba(8, 10, 22, 0.65); border: 1px solid rgba(232, 196, 106, 0.45);
+            border-radius: 2px; cursor: pointer;
         }
-        #controls button:hover { color: #1a1a2e; background: #ffd700; }
-        /* Small, out of the way, and reachable while the game covers the page. The game's
-           own controls sit in the right corner, so this one takes the left. */
-        #forget {
-            position: fixed; left: 0.75em; bottom: 0.75em; padding: 0.2em 0.6em;
-            font-size: 0.75rem; color: #ddd; background: rgba(0, 0, 0, 0.55);
-            border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 0.3em; cursor: pointer;
-        }
-        #forget:hover { color: #1a1a2e; background: #ffd700; }
-        /* The bar over everything while the game files are read: it covers the canvas, or
-           the start page before the game starts, so the page never looks dead. It takes no
-           clicks, so a folder can still be dropped on the page under it. */
+        #controls button:hover { color: var(--ink); background: var(--gold); }
+
+        /* ── The copy into browser storage: a small bar at the bottom, never over the
+           game's centre. It takes no clicks, so a folder can still be dropped under it. ── */
         #progress {
-            position: fixed; inset: 0; z-index: 3; display: flex; flex-direction: column;
-            align-items: center; justify-content: center; gap: 0.6em;
-            background: rgba(26, 26, 46, 0.85); pointer-events: none;
+            position: fixed; left: 50%; bottom: 0.9rem; transform: translateX(-50%); z-index: 3;
+            display: flex; flex-direction: column; align-items: center; gap: 0.35em;
+            padding: 0.55em 1em; border-radius: 3px; pointer-events: none;
+            background: rgba(8, 10, 22, 0.78); border: 1px solid rgba(232, 196, 106, 0.35);
         }
         #progress[hidden] { display: none; }
         #progress-track {
-            width: min(60ch, 80vw); height: 1em; border: 1px solid #ffd700;
-            border-radius: 0.3em; overflow: hidden;
+            width: min(22rem, 70vw); height: 4px; border-radius: 2px; overflow: hidden;
+            background: rgba(232, 196, 106, 0.2);
         }
-        #progress-fill { width: 0; height: 100%; background: #ffd700; }
-        #progress-text { color: #ffd700; }
-        /* The Saves panel covers everything, over the canvas and the progress bar, so the
-           player can reach it while the game is playing. `[hidden]` is spelled out again,
-           as it is for the start page. */
+        #progress-fill { width: 0; height: 100%; background: linear-gradient(90deg, var(--gold-deep), var(--gold-bright)); }
+        #progress-text { font-size: 0.78rem; color: var(--gold); }
+
+        /* ── The saved games manager covers everything, over the canvas and the bars ── */
         #saves {
-            position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column;
-            gap: 0.7em; padding: 1.2em; overflow: auto;
-            background: rgba(26, 26, 46, 0.95);
+            position: fixed; inset: 0; z-index: 6; display: flex; align-items: center;
+            justify-content: center; padding: 2rem; overflow: auto;
+            background:
+                radial-gradient(ellipse at center, rgba(8, 10, 22, 0.55) 0%, rgba(8, 10, 22, 0.92) 75%),
+                url("assets/archive.jpg") center / cover no-repeat, var(--ink);
         }
         #saves[hidden] { display: none; }
-        #saves h2 { font-size: 1.2rem; color: #ffd700; }
-        #saves table { border-collapse: collapse; width: 100%; }
-        #saves th, #saves td { padding: 0.3em 0.6em; text-align: left; font-size: 0.9rem; }
-        #saves th { color: #ffd700; font-weight: normal; }
-        #saves tr:nth-child(even) td { background: rgba(255, 255, 255, 0.05); }
-        #saves button {
-            padding: 0.1em 0.5em; font-size: 0.8rem; color: #ddd;
-            background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 0.3em; cursor: pointer;
+        .saves-card {
+            width: min(58rem, 100%); max-height: 100%; display: flex; flex-direction: column; gap: 1rem;
+            padding: 1.6rem 1.8rem; overflow: auto; animation: rise 0.4s ease-out both;
+            background: linear-gradient(180deg, rgba(20, 26, 48, 0.92), rgba(10, 12, 24, 0.94));
+            border: 1px solid rgba(232, 196, 106, 0.55); border-radius: 3px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 0 0 4px rgba(0, 0, 0, 0.35), inset 0 0 0 5px rgba(232, 196, 106, 0.18);
         }
-        #saves button:hover { color: #1a1a2e; background: #ffd700; }
-        #saves-status { color: #ffd700; min-height: 1.2em; font-size: 0.85rem; }
+        .saves-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+        #saves h2 {
+            font-family: var(--serif); font-weight: 600; font-size: 1.6rem; letter-spacing: 0.15em;
+            text-transform: uppercase; color: var(--gold-bright);
+        }
+        #saves-close {
+            min-width: 0; padding: 0.3em 0.8em; font-size: 0.8rem;
+        }
+        #saves table { border-collapse: collapse; width: 100%; }
+        #saves th, #saves td { padding: 0.55em 0.7em; text-align: left; font-size: 0.92rem; }
+        #saves th {
+            font-family: var(--serif); font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase;
+            color: var(--gold); font-weight: normal; border-bottom: 1px solid rgba(232, 196, 106, 0.35);
+        }
+        #saves tbody tr { border-bottom: 1px solid rgba(241, 227, 192, 0.08); }
+        #saves tbody tr:hover td { background: rgba(232, 196, 106, 0.07); }
+        #saves td:nth-child(2) { color: var(--gold-bright); }
+        #saves td button {
+            padding: 0.25em 0.75em; font-size: 0.78rem; color: var(--papyrus); cursor: pointer;
+            background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(232, 196, 106, 0.4); border-radius: 2px;
+        }
+        #saves td button:hover { color: var(--ink); background: var(--gold); }
+        #saves td button.save-delete:hover { color: #fff; background: #9b2f22; border-color: #c4483a; }
+        #saves-empty { display: none; padding: 1.6rem 0; text-align: center; color: rgba(241, 227, 192, 0.7); font-style: italic; }
+        #saves.empty #saves-empty { display: block; }
+        #saves.empty table { display: none; }
+        #saves-status { color: var(--gold); min-height: 1.2em; font-size: 0.85rem; }
+        .saves-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+        .saves-foot p { font-size: 0.85rem; color: rgba(241, 227, 192, 0.7); max-width: 40ch; }
+        .saves-foot .btn { min-width: 0; font-size: 0.85rem; padding: 0.55em 1.1em; }
+
+        @media (max-width: 640px) {
+            #start {
+                flex-direction: column; align-items: stretch; justify-content: center;
+                padding: 6vh 6vw; background-position: 70% center;
+            }
+            .btn { min-width: 0; width: 100%; }
+            .credits { position: static; margin-top: 2rem; text-align: left; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+        }
     </style>
 </head>
 <body>
     <canvas id="osiris" hidden></canvas>
     <div id="start">
-        <h1>Osiris: Pharaoh in your browser</h1>
-        <p>Choose the folder where Pharaoh is installed. The files stay on your computer; nothing is uploaded.</p>
-        <input type="file" id="folder" webkitdirectory multiple />
-        <p>or drag the Pharaoh folder here</p>
-        <p id="status"></p>
+        <main class="title-panel">
+            <p class="kicker">Pharaoh + Cleopatra</p>
+            <h1>Osiris</h1>
+            <div class="rule"></div>
+            <p class="tagline">Raise the cities of the Nile, right here in your browser.</p>
+            <p id="found"></p>
+            <nav id="menu">
+                <button id="enter" type="button" class="btn primary" hidden>Enter the game</button>
+                <label id="choose" class="btn primary" for="folder">Choose your Pharaoh folder</label>
+                <input type="file" id="folder" class="visually-hidden" webkitdirectory multiple />
+                <button id="open-saves" type="button" class="btn" hidden>Saved games</button>
+                <div class="row">
+                    <button id="forget" type="button" class="btn subtle" hidden>Forget game files</button>
+                </div>
+            </nav>
+            <p id="status"></p>
+            <p class="fine" id="hint">You need your own copy of Pharaoh + Cleopatra (GOG or Steam). Choose its folder, or drag it onto this page. The files stay on your computer; nothing is uploaded.</p>
+        </main>
+        <p class="credits">Osiris engine, GPL-3.0. Not affiliated with the makers of Pharaoh.<br />Pharaoh is a trademark of its owners.</p>
     </div>
-    <button id="forget" hidden>Forget game files</button>
+    <div id="loading" hidden>
+        <div class="sun" aria-hidden="true"></div>
+        <h2>Entering the kingdom</h2>
+        <p id="loading-text">Starting the game...</p>
+        <div class="ticker" aria-hidden="true"></div>
+        <p id="loading-flavour"></p>
+    </div>
     <div id="progress" hidden>
         <div id="progress-track"><div id="progress-fill"></div></div>
         <p id="progress-text"></p>
@@ -104,17 +284,25 @@
         <button id="page">Page</button>
     </div>
     <div id="saves" hidden>
-        <h2>Saves</h2>
-        <table>
-            <thead>
-                <tr><th>Family</th><th>File</th><th>Size</th><th>Date</th><th></th><th></th></tr>
-            </thead>
-            <tbody id="saves-rows"></tbody>
-        </table>
-        <p id="saves-status"></p>
-        <p>Import a save into this family's saves folder:
-            <input type="file" id="import" accept=".osiris" /></p>
-        <button id="saves-close">Close</button>
+        <div class="saves-card">
+            <div class="saves-head">
+                <h2>Saved games</h2>
+                <button id="saves-close" type="button" class="btn">Close</button>
+            </div>
+            <table>
+                <thead>
+                    <tr><th>Family</th><th>Game</th><th>Size</th><th>Saved</th><th></th><th></th></tr>
+                </thead>
+                <tbody id="saves-rows"></tbody>
+            </table>
+            <p id="saves-empty">The archive is empty. Save from the game's own menu (or press F5 in a city), or import a save below.</p>
+            <p id="saves-status"></p>
+            <div class="saves-foot">
+                <p>Saves live in this browser. Download them to keep a copy, or import an .osiris file from another computer.</p>
+                <label class="btn" for="import">Import a save</label>
+                <input type="file" id="import" class="visually-hidden" accept=".osiris" />
+            </div>
+        </div>
     </div>
     <script src="store.js"></script>
     <script src="audio.js"></script>

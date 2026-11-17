@@ -485,6 +485,26 @@ async function runDirectMission({ alreadyStarted = false } = {}) {
 }
 
 /**
+ * Press the title screen's "Enter the game" button once the page shows it, which it does
+ * when it knows the game files (a pick or the copy in browser storage). Then wait for the
+ * loading screen the press puts up. Returns false when the button never came.
+ */
+async function enterGame() {
+    try {
+        await page.waitForSelector("#enter", { state: "visible", timeout: 120_000 });
+        await page.click("#enter");
+        await page.waitForSelector("#loading", { state: "visible", timeout: 10_000 }).catch(() => {
+            /* a very fast start may take the loading screen down before this looks */
+        });
+        console.log("osiris web: pressed Enter the game");
+        return true;
+    } catch (err) {
+        console.error("osiris web: no Enter button: " + err.message);
+        return false;
+    }
+}
+
+/**
  * SMOKE_REMEMBER=1: the page keeps the game files. Read them through the page's own picker
  * (the copy needs the File objects a pick gives it), wait for the copy into the browser's
  * own storage, reload the page in the same browser profile, and expect the main menu with
@@ -535,6 +555,13 @@ async function runRemember(stagingDir) {
         500
     );
     const restoredCount = Number(/\((\d+) files\)/.exec(restoredLine() ?? "")?.[1] ?? 0);
+    // A restored visit waits on the title screen with "Enter the game"; no picker needed.
+    const entered = restored && (await enterGame());
+    if (restored && !entered) {
+        console.error("FAIL: the title screen never offered 'Enter the game' after the restore");
+        process.exitCode = 1;
+        return;
+    }
     const menu = await until(
         () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: main menu")),
         600_000,
@@ -2363,6 +2390,15 @@ async function run() {
                         ? "osiris web: the page found the root under " + WRAP + " and skipped the stray file"
                         : "osiris web: the page found the root and read all " + relPaths.length + " files"
                 );
+
+                // The pick only finds the files; the title screen's Enter button starts the
+                // game, as a player would press it.
+                const entered = await enterGame();
+                if (!entered) {
+                    console.error("FAIL: the title screen never offered 'Enter the game' after the pick");
+                    process.exitCode = 1;
+                    return;
+                }
 
                 // The page is still reading those files (775 MB on this machine), so the
                 // staging folder has to stay on disk until it has read them all and

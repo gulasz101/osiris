@@ -75,9 +75,13 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 - **Your folder is remembered.** After the first load the page copies the game files into the
   browser's own storage (the Origin Private File System: about 780 MB for a full install, with
   PDFs, archives and installers left out) and writes a marker only once every file is there. On
-  the next visit the game starts from that copy with no folder picker (`web-remember`).
-  `OSIRIS_DATA=<folder> SMOKE_REMEMBER=1 scripts/web-smoke.sh` prints
+  the next visit the title screen offers "Enter the game" from that copy with no folder picker
+  (`web-remember`). `OSIRIS_DATA=<folder> SMOKE_REMEMBER=1 scripts/web-smoke.sh` prints
   `osiris web: remember OK (N files)`.
+- **A title screen and a loading screen.** The page opens on original artwork (made with the
+  Image Studio's Gemini engine, `web/assets/`) with a menu: choose the Pharaoh folder, enter the
+  game, saved games, forget the files. A pick or a restore only finds the files; "Enter the game"
+  starts it, and a loading screen stays up until the game calls `osirisReady` (`web-title`).
 - **Saves and settings stay across reloads.** They are kept in the browser's IndexedDB under
   `/user` (`web-persist`). `scripts/web-smoke.sh` prints `osiris web: persist OK`.
 - **A save leaves the browser and comes back.** The Saves button lists every save under `/user`

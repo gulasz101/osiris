@@ -29,6 +29,20 @@ pub fn since_pick_ms() -> Option<f64> {
     Some((now - at).max(0.0))
 }
 
+/// Tell the page the game has its first screen, so it can take its loading screen down.
+/// The page sets `globalThis.osirisReady` to a function before it starts the game; a page
+/// without one (the smoke test's own start) is left alone.
+pub fn notify_ready() {
+    let Ok(hook) = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("osirisReady")) else {
+        return;
+    };
+    if let Some(hook) = hook.dyn_ref::<js_sys::Function>()
+        && let Err(err) = hook.call0(&JsValue::NULL)
+    {
+        log::warn!("osiris web: the page's ready hook failed: {err:?}");
+    }
+}
+
 // ── Debug audio for the smoke test ──────────────────────────────────
 
 thread_local! {

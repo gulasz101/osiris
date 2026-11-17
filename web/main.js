@@ -40,8 +40,25 @@ const forgetButton = document.getElementById("forget");
 const controls = document.getElementById("controls");
 const fullscreenButton = document.getElementById("fullscreen");
 const pageButton = document.getElementById("page");
-// The bar over everything while the game files are read.
+// The title screen's menu: Enter starts the game once the files are known, the label opens
+// the folder picker, and Saved games opens the saves manager before the game is running.
+const enterButton = document.getElementById("enter");
+const chooseLabel = document.getElementById("choose");
+const openSavesButton = document.getElementById("open-saves");
+const found = document.getElementById("found");
+const hint = document.getElementById("hint");
+// The loading screen between Enter and the game's first screen.
+const loading = document.getElementById("loading");
+const loadingText = document.getElementById("loading-text");
+const loadingFlavour = document.getElementById("loading-flavour");
+// The bar at the bottom while the game files are copied into browser storage.
 const progress = createBar(document.getElementById("progress"));
+
+// Where the page is: "choose" (no game files yet), "ready" (files known, Enter shown),
+// "starting" (the loading screen is up) or "running" (the game has drawn its first screen).
+let phase = "choose";
+// The files of the last pick, or null when they came from browser storage.
+let pickedFiles = null;
 
 // `?mission=N` starts that mission straight away, as `osiris --mission N` does on the
 // desktop. A value that is not a whole number is refused before the game starts.
@@ -115,19 +132,122 @@ function fitCanvas() {
 }
 
 /**
+ * Draw the title screen's menu for the current phase: before any files only the picker,
+ * with files known a big Enter button and the picker as the second choice, and over a
+ * running game a way back to it.
+ */
+function showMenu() {
+    const ready = phase === "ready";
+    const running = phase === "running" || phase === "starting";
+    if (enterButton) {
+        enterButton.hidden = !(ready || running);
+        enterButton.textContent = running ? "Back to the game" : "Enter the game";
+    }
+    if (chooseLabel) {
+        // The game cannot be started twice in one page, so a running game hides the picker.
+        chooseLabel.hidden = running;
+        chooseLabel.textContent = ready ? "Use another Pharaoh folder" : "Choose your Pharaoh folder";
+        chooseLabel.classList.toggle("primary", !ready);
+    }
+    if (openSavesButton) openSavesButton.hidden = false;
+    if (hint) hint.hidden = ready || running;
+}
+
+/** Say on the title screen which game files the page holds. */
+function sayFound(count, bytes, where) {
+    if (!found) return;
+    const mb = Math.round(bytes / (1024 * 1024));
+    found.textContent = "✓ " + count + " game files" + (mb > 0 ? " (" + mb + " MB)" : "") + " " + where + ".";
+}
+
+const FLAVOUR = [
+    "The scribes are unrolling the maps.",
+    "The priests are reading the height of the flood.",
+    "The overseers are counting the granaries.",
+    "The masons are cutting fresh limestone.",
+    "The boatmen are loading the feluccas.",
+];
+let flavourTimer = 0;
+let slowTimer = 0;
+
+/** Put the loading screen up, with a line that changes every few seconds. */
+function showLoading() {
+    if (!loading) return;
+    loading.classList.remove("fade");
+    loading.hidden = false;
+    if (loadingText) loadingText.textContent = "Starting the game...";
+    let i = Math.floor(Math.random() * FLAVOUR.length);
+    if (loadingFlavour) loadingFlavour.textContent = FLAVOUR[i];
+    flavourTimer = setInterval(() => {
+        i = (i + 1) % FLAVOUR.length;
+        if (loadingFlavour) loadingFlavour.textContent = FLAVOUR[i];
+    }, 2600);
+    // The first start after a pick reads the files the menu needs from disk; say so when
+    // it takes a while, so the page never looks stuck.
+    slowTimer = setTimeout(() => {
+        if (loadingText) loadingText.textContent = "Still starting. The first start can take a minute.";
+    }, 20_000);
+}
+
+/** Fade the loading screen out once the game has drawn its first screen. */
+function hideLoading() {
+    clearInterval(flavourTimer);
+    clearTimeout(slowTimer);
+    if (!loading || loading.hidden) return;
+    loading.classList.add("fade");
+    setTimeout(() => {
+        loading.hidden = true;
+        loading.classList.remove("fade");
+    }, 650);
+}
+
+// The game calls this (`web::notify_ready`) when it has its first screen: the intro, the
+// main menu, or the mission `?mission=` asked for.
+globalThis.osirisReady = () => {
+    console.log("osiris web: the game is ready, taking the loading screen down");
+    phase = "running";
+    if (controls) controls.hidden = false;
+    hideLoading();
+    showMenu();
+};
+
+/**
  * Show the canvas and start the game. The game files must be mounted already, either by
- * `loadFolder` from the player's folder or from the copy in browser storage.
+ * `loadFolder` from the player's folder or from the copy in browser storage. The loading
+ * screen covers the canvas until the game says it is ready.
  */
 function start() {
+    if (phase === "running" || phase === "starting") {
+        // Over a running game, Enter is the way back to it.
+        if (startDiv.classList.contains("over-game")) togglePage();
+        return;
+    }
+    phase = "starting";
+    // The menu-time line counts from Enter now: that is the wait the player sees.
+    set_pick_time(performance.now());
+    showLoading();
     startDiv.style.display = "none";
     startDiv.hidden = true;
     canvas.hidden = false;
     // The canvas is the window, so winit's canvas window has the right size from the start.
     fitCanvas();
-    // Only the game is on screen now, with these controls on top of it.
-    if (controls) controls.hidden = false;
-    status.textContent = "Starting game...";
+    status.textContent = "";
+    showMenu();
     start_game(mission);
+}
+
+if (enterButton) {
+    enterButton.addEventListener("click", () => {
+        if (pickedFiles === null && phase === "ready") {
+            startStored();
+            return;
+        }
+        try {
+            start();
+        } catch (err) {
+            fail(err);
+        }
+    });
 }
 
 /**
@@ -172,6 +292,7 @@ function togglePage() {
         startDiv.hidden = false;
         startDiv.classList.add("over-game");
         startDiv.style.display = "flex";
+        showMenu();
     }
     if (pageButton) pageButton.textContent = showing ? "Page" : "Back to game";
 }
@@ -281,8 +402,10 @@ async function fillSaves() {
         buttonCell(row, "Delete", "save-delete", () => deleteSave(entry));
         savesRows.appendChild(row);
     }
+    if (savesPanel) savesPanel.classList.toggle("empty", entries.length === 0);
     if (entries.length === 0) {
-        savesSay("No saved games yet. Save from the game's own menu, or import one below.");
+        // The panel's own empty line says it; the status line stays free for feedback.
+        savesSay("");
     } else {
         savesSay(entries.length === 1 ? "1 save" : entries.length + " saves");
     }
@@ -302,6 +425,16 @@ function closeSaves() {
 if (savesButton) {
     savesButton.addEventListener("click", openSaves);
 }
+if (openSavesButton) {
+    openSavesButton.addEventListener("click", openSaves);
+}
+// Escape closes the saves manager, as it closes a window in the game.
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && savesPanel && !savesPanel.hidden) {
+        event.preventDefault();
+        closeSaves();
+    }
+});
 if (savesClose) {
     savesClose.addEventListener("click", closeSaves);
 }
@@ -340,6 +473,9 @@ if (importInput) {
 /** Put the start screen back and say what went wrong, leaving the page usable. */
 function fail(err) {
     console.error(err);
+    hideLoading();
+    phase = countGameFiles() > 0 ? "ready" : "choose";
+    showMenu();
     startDiv.hidden = false;
     startDiv.style.display = "flex";
     startDiv.classList.remove("over-game");
@@ -368,19 +504,26 @@ if (!missionInvalid) {
 }
 if (storedFiles > 0) {
     console.log("osiris web: game files restored from browser storage (" + storedFiles + " files)");
-    status.textContent = "Restored " + storedFiles + " game files from browser storage.";
+    // The player picks what happens next: Enter the game with these files, or another folder.
+    phase = "ready";
+    sayFound(storedFiles, totalGameBytes(), "kept in this browser");
+    showForget();
+}
+showMenu();
+if (phase === "ready" && enterButton) enterButton.focus();
+
+// A stored copy the game cannot use must never leave the player stuck on it: Enter on such a
+// copy forgets it and asks for the folder again.
+async function startStored() {
     try {
         start();
-        showForget();
     } catch (err) {
-        // A stored copy the game cannot use must never leave the player stuck on it.
         console.warn("osiris web: the stored game files cannot start the game, forgetting them", err);
         await forgetGameFiles();
-        startDiv.hidden = false;
-        startDiv.style.display = "flex";
-        startDiv.classList.remove("over-game");
-        if (controls) controls.hidden = true;
-        canvas.hidden = true;
+        fail(err);
+        phase = "choose";
+        showMenu();
+        if (found) found.textContent = "";
         status.textContent =
             "The game files kept in the browser cannot start the game. Choose your Pharaoh folder again.";
     }
@@ -425,6 +568,11 @@ async function copyToStorage(files) {
 }
 
 async function loadFolder(list) {
+    if (phase === "starting" || phase === "running") {
+        // The game cannot be started twice in one page; a reload starts over.
+        status.textContent = "The game is already running. Reload the page to use another folder.";
+        return;
+    }
     if (missionInvalid) {
         status.textContent = "mission must be a number";
         return;
@@ -470,15 +618,17 @@ async function loadFolder(list) {
         Math.round(performance.now() - started) + " ms"
     );
 
-    try {
-        start();
-    } catch (err) {
-        fail(err);
-        return;
-    }
+    // The files are known; the player enters the game with the big button. A pick is a
+    // click, so the browser will let the game's audio play once it starts.
+    pickedFiles = files;
+    phase = "ready";
+    status.textContent = "";
+    sayFound(countGameFiles(), totalGameBytes(), "found in your Pharaoh folder");
+    showMenu();
+    if (enterButton) enterButton.focus();
 
-    // The game is running; keep these files for the next load. Not awaited: the copy runs
-    // file by file while the game draws, and its progress goes to the console.
+    // Keep these files for the next visit. Not awaited: the copy runs file by file in the
+    // background, its bar at the bottom of the page, and the game can start meanwhile.
     copyToStorage(files);
 }
 

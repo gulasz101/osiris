@@ -7,9 +7,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 sh scripts/build-web.sh
-rm -rf out/site && mkdir -p out/site/pkg
+rm -rf out/site && mkdir -p out/site/pkg out/site/assets
 cp web/index.html out/site/
 cp web/*.js out/site/
+cp web/assets/*.jpg out/site/assets/
 cp web/pkg/osiris.js web/pkg/osiris_bg.wasm out/site/pkg/
 : > out/site/.nojekyll
 sh scripts/check-site.sh out/site

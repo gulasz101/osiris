@@ -43,8 +43,10 @@ failed=0
 while IFS= read -r rel; do
     [ -n "$rel" ] || continue
 
+    # The page's own artwork (the title and loading screens) sits in assets/ as JPEG.
     if ! printf '%s\n' "$allowed" | grep -qxF "$rel" &&
-        ! printf '%s\n' "$rel" | grep -qxE '[A-Za-z0-9._-]+\.js'; then
+        ! printf '%s\n' "$rel" | grep -qxE '[A-Za-z0-9._-]+\.js' &&
+        ! printf '%s\n' "$rel" | grep -qxE 'assets/[A-Za-z0-9._-]+\.jpg'; then
         echo "check-site: $rel is not a page file"
         failed=1
     fi

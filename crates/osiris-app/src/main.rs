@@ -1813,6 +1813,10 @@ impl App {
                 }
             }
         }
+        // The page shows its loading screen until the game has its first screen, whichever
+        // one that is (the intro, the main menu or a mission from `?mission=`).
+        #[cfg(target_arch = "wasm32")]
+        crate::web::notify_ready();
         if let Some(a) = &self.audio
             && !matches!(self.screen, Some(Screen::Movie(..)))
         {

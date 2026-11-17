@@ -1346,28 +1346,22 @@ impl ApplicationHandler for App {
                         .dyn_into::<web_sys::HtmlCanvasElement>()
                         .unwrap()
                 });
-            // Un-hide the canvas and set explicit intrinsic dimensions.
+            // Un-hide the canvas. The page owns its size: `main.js` `fitCanvas` makes the
+            // CSS size the window's and the bitmap that times the device pixel ratio, and
+            // winit reports the change back as a `Resized` event.
             let _ = canvas.style().set_property("display", "block");
-            if canvas.width() < 2 {
-                let (w, h) = (
-                    self.args.size.0.max(MIN_WINDOW.0),
-                    self.args.size.1.max(MIN_WINDOW.1),
-                );
-                canvas.set_width(w);
-                canvas.set_height(h);
+            if canvas.width() < 2 || canvas.height() < 2 {
+                // A page that never sized its canvas still gets one the game can draw
+                // into, at the size `start_game` was given.
+                canvas.set_width(self.args.size.0.max(1));
+                canvas.set_height(self.args.size.1.max(1));
             }
 
-            let (width, height) = (
-                canvas.client_width() as u32,
-                canvas.client_height() as u32,
-            );
+            // No `with_inner_size` and no `with_min_inner_size` here: on the web winit
+            // writes both onto the canvas's CSS size, which would undo the page's fit and
+            // keep the canvas at 1024x768 in a smaller window.
             let attrs = Window::default_attributes()
                 .with_title("Osiris")
-                .with_inner_size(winit::dpi::LogicalSize::new(
-                    width.max(MIN_WINDOW.0),
-                    height.max(MIN_WINDOW.1),
-                ))
-                .with_min_inner_size(winit::dpi::LogicalSize::new(MIN_WINDOW.0, MIN_WINDOW.1))
                 .with_canvas(Some(canvas));
 
             let window = match event_loop.create_window(attrs) {

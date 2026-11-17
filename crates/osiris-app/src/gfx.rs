@@ -153,19 +153,16 @@ impl Gfx {
         // In the browser the window's own `inner_size` is only filled in by
         // winit's resize observer, which has not run yet when graphics start:
         // it reads 0, the surface would be configured 1x1 and nothing would be
-        // drawn. Take the size from the canvas instead, in the same device
-        // pixels winit's later resize events use.
+        // drawn. Take the size from the canvas instead: the page (`main.js`
+        // `fitCanvas`) set the bitmap to the window's size in device pixels, so
+        // it is exactly the drawing buffer the surface is about to configure.
         #[cfg(target_arch = "wasm32")]
         let size = {
             use winit::platform::web::WindowExtWebSys;
-            let scale = window.scale_factor();
             window.canvas().map_or_else(
                 || window.inner_size(),
                 |canvas| {
-                    winit::dpi::PhysicalSize::new(
-                        (canvas.client_width() as f64 * scale).round().max(1.0) as u32,
-                        (canvas.client_height() as f64 * scale).round().max(1.0) as u32,
-                    )
+                    winit::dpi::PhysicalSize::new(canvas.width().max(1), canvas.height().max(1))
                 },
             )
         };

@@ -182,6 +182,23 @@ pub fn debug_read_user(name: String) -> Option<String> {
         .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
 }
 
+/// The page canvas's bitmap size, as `main.js` `fitCanvas` left it: the window's size in
+/// device pixels. Falls back to the game's minimum when the page has no canvas or has not
+/// sized it yet, so the game always has something to draw into.
+fn canvas_size() -> (u32, u32) {
+    let canvas = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("osiris"))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+    let Some(canvas) = canvas else {
+        return (1024, 768);
+    };
+    if canvas.width() < 2 || canvas.height() < 2 {
+        return (1024, 768);
+    }
+    (canvas.width(), canvas.height())
+}
+
 /// Start the game. The page must have called [`mount_file`] for every file in the
 /// player's chosen Pharaoh folder first.
 ///
@@ -203,13 +220,17 @@ pub fn start_game(mission: Option<u32>) -> Result<(), JsValue> {
 
     log::info!("osiris web: start_game - /PharaohData/Data exists, calling run()");
 
+    // The game's size is the page's canvas, which `main.js` sized for the window. There is
+    // no fixed size of our own on the web.
+    let (width, height) = canvas_size();
+
     let args = crate::Args {
         data: Some(PathBuf::from("/PharaohData")),
         map: None,
         mission: mission.map(|m| m as usize),
         screenshot: None,
         script: None,
-        size: (1280, 768),
+        size: (width, height),
         size_given: false,
         replay: None,
         lang: None,

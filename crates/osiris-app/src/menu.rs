@@ -301,6 +301,18 @@ enum Action {
     Choose(Choice),
 }
 
+/// The browser smoke test names each button by its action, so `Action` prints as
+/// `Go(Campaign)` or `Choose(Mission(0))`.
+#[cfg(target_arch = "wasm32")]
+impl std::fmt::Debug for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Action::Go(page) => write!(f, "Go({page:?})"),
+            Action::Choose(choice) => write!(f, "Choose({choice:?})"),
+        }
+    }
+}
+
 pub struct Menu {
     page: Page,
     items: Vec<Item>,
@@ -1398,6 +1410,84 @@ impl Menu {
             Page::Family => self.draw_paged(r, panels, BG_REGISTRY, Self::draw_family),
             Page::NewFamily => self.draw_paged(r, panels, BG_CHOOSE_GAME, Self::draw_new_family),
         }
+        #[cfg(target_arch = "wasm32")]
+        self.capture_buttons(r.screen);
+    }
+
+    /// Records the buttons of the page just drawn, in canvas pixels, for the browser smoke
+    /// test, which then clicks them the way a player does (web-mission design, section 3).
+    /// `action` is the item's own `Action`, or the page change a fixed button makes; empty
+    /// when no menu is on screen.
+    #[cfg(target_arch = "wasm32")]
+    fn capture_buttons(&self, screen: [f32; 2]) {
+        let mut buttons: Vec<(String, String, [f32; 4])> = Vec::new();
+        // The rects are in the page's own coordinates, so they go through the page's frame.
+        let mut rows = |frame: Frame, rects: Vec<([f32; 4], usize)>| {
+            for (rect, i) in rects {
+                let item = &self.items[i];
+                if !item.enabled {
+                    continue;
+                }
+                let r = [frame.o[0] + rect[0] * frame.s, frame.o[1] + rect[1] * frame.s, rect[2] * frame.s, rect[3] * frame.s];
+                buttons.push((format!("{:?}", item.action), item.label.clone(), r));
+            }
+        };
+        match self.page {
+            Page::Main | Page::Options => {
+                let frame = Self::main_frame(screen);
+                rows(frame, (0..self.items.len()).map(|i| (Self::main_button(i), i)).collect());
+            }
+            Page::Campaign | Page::Custom | Page::Editor => {
+                let frame = Frame::new(screen);
+                let (top, _) = self.list_top();
+                let listed = (self.scroll..self.items.len())
+                    .take(self.visible_rows())
+                    .map(|i| ([LIST_X, top + 16.0 * (i - self.scroll) as f32, LIST_W, 16.0], i))
+                    .collect();
+                rows(frame, listed);
+            }
+            Page::Load | Page::Family => {
+                let frame = Self::main_frame(screen);
+                let listed = (self.scroll..self.items.len())
+                    .take(PAGE_ROWS)
+                    .map(|i| ([PAGE_ROW[0], PAGE_ROW[1] + PAGE_ROW[3] * (i - self.scroll) as f32, PAGE_ROW[2], PAGE_ROW[3]], i))
+                    .collect();
+                rows(frame, listed);
+            }
+            _ => {}
+        }
+        // The registry's own buttons and the ones that leave a page or start the city have
+        // no `Item` of their own, so they are named by what clicking them does.
+        let fixed: Vec<_> = match self.page {
+            Page::Family => vec![
+                (REGISTRY_BUTTONS[0], "Go(NewFamily)", self.family_text.new_button.as_str()),
+                (REGISTRY_BUTTONS[2], "Choose(Family)", self.family_text.proceed_button.as_str()),
+                (REGISTRY_BUTTONS[3], "Go(Main)", self.family_text.back_button.as_str()),
+            ],
+            Page::NewFamily => vec![(NEW_FAMILY_GO, "Go(Family)", self.family_text.continue_button.as_str())],
+            Page::Briefing => vec![(BRIEF_GO, "ToCity", "")],
+            _ => Vec::new(),
+        };
+        let frame = if matches!(self.page, Page::Main | Page::Options | Page::Load | Page::Family | Page::NewFamily) { Self::main_frame(screen) } else { Frame::new(screen) };
+        for (rect, action, label) in fixed {
+            if self.page == Page::Briefing && self.briefing.is_none() {
+                continue;
+            }
+            let r = [frame.o[0] + rect[0] * frame.s, frame.o[1] + rect[1] * frame.s, rect[2] * frame.s, rect[3] * frame.s];
+            buttons.push((action.to_owned(), label.to_owned(), r));
+        }
+        let json = buttons
+            .iter()
+            .map(|(action, label, [x, y, w, h])| {
+                format!(
+                    "{{\"action\":\"{}\",\"label\":\"{}\",\"x\":{x:.1},\"y\":{y:.1},\"w\":{w:.1},\"h\":{h:.1}}}",
+                    json_text(action),
+                    json_text(label)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        crate::web::set_menu_buttons(format!("[{json}]"));
     }
 
     /// The family's menu: its title and buttons on the FE_ChooseGame art, drawn in that
@@ -1811,4 +1901,19 @@ impl Menu {
             Self::icon_button(r, 4, at(POPUP_NO), cursor);
         }
     }
+}
+
+/// `s` as the inside of a JSON string.
+#[cfg(target_arch = "wasm32")]
+fn json_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
 }

@@ -12,6 +12,25 @@ thread_local! {
     static DEBUG_AUDIO: RefCell<Option<osiris_audio::Audio>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// The menu page's clickable buttons as JSON, filled by `menu.rs` as it draws and read
+    /// by the smoke test so it can click the menu the way a player does.
+    static MENU_BUTTONS: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Keeps the buttons of the menu page drawn last (browser only, `menu.rs` calls this).
+pub fn set_menu_buttons(json: String) {
+    MENU_BUTTONS.with(|cell| *cell.borrow_mut() = json);
+}
+
+/// The buttons of the menu page drawn last, as JSON:
+/// `[{"action":"Go(Campaign)","label":"Begin Family History","x":..,"y":..,"w":..,"h":..}]`,
+/// in the canvas's pixels, for the smoke test. Empty when no menu is on screen.
+#[wasm_bindgen]
+pub fn debug_menu_buttons() -> String {
+    MENU_BUTTONS.with(|cell| cell.borrow().clone())
+}
+
 /// Open the default audio output device and keep it (browser, smoke test only).
 ///
 /// Returns `true` when a device opened: on a browser without an audio output this is

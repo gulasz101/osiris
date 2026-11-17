@@ -20,6 +20,7 @@ if (!["", "direct", "menu"].includes(MISSION_MODE)) {
     process.exit(1);
 }
 const DIRECT = MISSION_MODE === "direct";
+const MENU = MISSION_MODE === "menu";
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -214,6 +215,152 @@ async function runDirectMission() {
         process.exitCode = 1;
     } else {
         console.log("osiris web: city started and ran " + months.length + " months: " + months.join(", "));
+    }
+}
+
+/** The buttons of the menu page drawn last, as the browser build reports them. */
+async function menuButtons() {
+    const json = await page.evaluate(() => (typeof debug_menu_buttons === "function" ? debug_menu_buttons() : "[]"));
+    try {
+        return JSON.parse(json);
+    } catch {
+        return [];
+    }
+}
+
+/** Where the canvas sits in the page, so a menu rect becomes a page coordinate. */
+async function canvasOrigin() {
+    return page.evaluate(() => {
+        const canvas = document.getElementById("osiris");
+        const r = canvas.getBoundingClientRect();
+        return { left: r.left, top: r.top };
+    });
+}
+
+/** Waits until the menu reports `osiris web: page <name>`, after the `from`th console line. */
+function waitPage(name, ms = 60_000, from = 0) {
+    return until(() => consoleMessages.slice(from).some((m) => m.includes("osiris web: page " + name)), ms, 250);
+}
+
+/**
+ * Clicks the first menu button whose action starts with `prefix`, the way a player
+ * would: read the button's rect, add the canvas's place in the page, click its centre.
+ */
+async function clickMenu(prefix, last = false) {
+    const buttons = await menuButtons();
+    const matching = buttons.filter((b) => b.action.startsWith(prefix));
+    const hit = last ? matching[matching.length - 1] : matching[0];
+    if (!hit) {
+        throw new Error("no menu button starts with " + JSON.stringify(prefix) + "; the page has " + JSON.stringify(buttons.map((b) => b.action)));
+    }
+    const origin = await canvasOrigin();
+    await page.mouse.click(origin.left + hit.x + hit.w / 2, origin.top + hit.y + hit.h / 2);
+    console.log("osiris web: clicked " + hit.action + " (" + hit.label + ")");
+    return hit;
+}
+
+/**
+ * SMOKE_MISSION=menu: start a mission from the menu, the way the player does. Creates a
+ * family in the registry, goes to the campaign, picks the first mission and its briefing,
+ * then lets the city run. Two different months prove the simulation advanced.
+ */
+async function runMenuMission() {
+    const family = await waitPage("family", 60_000, 0);
+    if (!family) {
+        console.error("FAIL: the registry page never came up");
+        process.exitCode = 1;
+        return;
+    }
+    const registry = await menuButtons();
+    console.log("osiris web: the registry offers " + JSON.stringify(registry.slice(0, 2)));
+
+    // A new family, named by typing as a player would.
+    let from = consoleMessages.length;
+    await clickMenu("Go(NewFamily)");
+    if (!(await waitPage("newfamily", 30_000, from))) {
+        console.error("FAIL: the new family page never came up");
+        process.exitCode = 1;
+        return;
+    }
+    from = consoleMessages.length;
+    await page.keyboard.type("Smoke");
+    await page.keyboard.press("Enter");
+    if (!(await waitPage("family", 60_000, from))) {
+        console.error("FAIL: the registry never came back after naming the family");
+        process.exitCode = 1;
+        return;
+    }
+
+    // Pick the family just made and go on to its menu.
+    from = consoleMessages.length;
+    await clickMenu('Choose(Family("');
+    await clickMenu("Choose(Family", true);
+    if (!(await waitPage("main", 60_000, from))) {
+        console.error("FAIL: the family's menu never came up after choosing it");
+        for (const m of consoleMessages) console.log(m);
+        process.exitCode = 1;
+        return;
+    }
+
+    // The campaign's first mission, and its briefing.
+    from = consoleMessages.length;
+    await clickMenu("Go(Campaign)");
+    if (!(await waitPage("campaign", 60_000, from))) {
+        console.error("FAIL: the campaign's mission list never came up");
+        process.exitCode = 1;
+        return;
+    }
+    from = consoleMessages.length;
+    await clickMenu("Choose(Mission");
+    if (!(await waitPage("briefing", 60_000, from))) {
+        console.error("FAIL: the briefing never came up");
+        process.exitCode = 1;
+        return;
+    }
+
+    // On to the city. A mission opens messages when it starts, and the game stands still
+    // while one is up, so press Escape now and then and let the city run.
+    from = consoleMessages.length;
+    await clickMenu("ToCity");
+    let twoMonths = await until(() => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: city ")), 120_000, 500);
+    if (twoMonths) {
+        await page.mouse.click((await canvasOrigin()).left + 640, (await canvasOrigin()).top + 384);
+        for (let i = 0; i < 6; i += 1) await page.keyboard.press("BracketRight");
+    }
+    let dismissed = 0;
+    const deadline = Date.now() + 300_000;
+    while (twoMonths && monthsSeen().length < 2 && Date.now() < deadline) {
+        if (panicLine() !== null) break;
+        await page.keyboard.press("Escape");
+        dismissed += 1;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    twoMonths = twoMonths && monthsSeen().length >= 2;
+    const started = consoleMessages.some((m) => m.includes("osiris web: city ") && m.includes(" started"));
+    console.log("osiris web: pressed Escape " + dismissed + " times to close the mission's screens");
+
+    for (const message of consoleMessages) console.log(message);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await page.screenshot({ path: "/tmp/osiris-web-city.png", fullPage: false });
+    const shot = fs.statSync("/tmp/osiris-web-city.png").size;
+    console.log("osiris web: screenshot written to /tmp/osiris-web-city.png (" + shot + " bytes)");
+
+    const panic = panicLine();
+    const months = monthsSeen();
+    if (panic) {
+        console.error("FATAL: wasm panic detected: " + panic);
+        process.exitCode = 1;
+    } else if (!started) {
+        console.error("FAIL: never saw the city start from the menu");
+        process.exitCode = 1;
+    } else if (!twoMonths || months.length < 2) {
+        console.error("FAIL: the city did not run two months (saw " + JSON.stringify(months) + ")");
+        process.exitCode = 1;
+    } else if (shot < 50_000) {
+        console.error("FAIL: the city screenshot is only " + shot + " bytes, likely blank");
+        process.exitCode = 1;
+    } else {
+        console.log("osiris web: the menu started a city that ran " + months.length + " months: " + months.join(", "));
     }
 }
 
@@ -583,6 +730,11 @@ async function run() {
 
             // Start the game — returns a Promise on wasm.
             await page.evaluate(() => start_game());
+
+            if (MENU) {
+                await runMenuMission();
+                return;
+            }
 
             // Wait for main menu (up to 300 s for large folders).
             const menuDeadline = Date.now() + 300_000;

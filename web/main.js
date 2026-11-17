@@ -1,4 +1,5 @@
 import init, {
+    debug_menu_buttons,
     debug_write_user,
     debug_read_user,
     mount_exact,
@@ -30,6 +31,7 @@ if (missionParam !== null) {
 const missionInvalid = missionParam !== null && mission === undefined;
 
 // Expose wasm functions on window so the smoke test can call them via page.evaluate().
+globalThis.debug_menu_buttons = debug_menu_buttons;
 globalThis.debug_write_user = debug_write_user;
 globalThis.debug_read_user = debug_read_user;
 globalThis.mount_exact = mount_exact;

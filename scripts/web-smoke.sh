@@ -33,4 +33,10 @@ fi
 if [ -n "${SMOKE_SOAK:-}" ]; then
     TIMEOUT=1800
 fi
+# A GPU run asks Chrome for the host's real GPU instead of the software-safe flags
+# (web-gpu-fps); the soak timeout above covers it when it is a soak. SMOKE_HEADED is
+# passed through by node's own environment, and only matters when headless gets no GPU.
+if [ -n "${SMOKE_GPU:-}" ]; then
+    TIMEOUT=1800
+fi
 timeout "$TIMEOUT" node smoke.mjs

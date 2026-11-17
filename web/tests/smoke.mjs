@@ -36,8 +36,23 @@ if (SOAK_RAW !== "" && !SOAK) {
     console.error("FAIL: SMOKE_SOAK must be 1 or unset (got " + SOAK_RAW + ")");
     process.exit(1);
 }
-const DIRECT = MISSION_MODE === "direct";
-const MENU = MISSION_MODE === "menu" || SAVES || SOAK;
+// `1` runs on the host's real GPU (web-gpu-fps): Chrome gets the Metal flags instead of
+// the software-safe ones, and the run fails if the page still drew with a software
+// adapter. `SMOKE_HEADED=1` also opens a window, for a host where headless gets no GPU.
+const GPU_RAW = (process.env.SMOKE_GPU ?? "").trim();
+const GPU = GPU_RAW === "1";
+if (GPU_RAW !== "" && !GPU) {
+    console.error("FAIL: SMOKE_GPU must be 1 or unset (got " + GPU_RAW + ")");
+    process.exit(1);
+}
+const HEADED_RAW = (process.env.SMOKE_HEADED ?? "").trim();
+const HEADED = HEADED_RAW === "1";
+if (HEADED_RAW !== "" && !HEADED) {
+    console.error("FAIL: SMOKE_HEADED must be 1 or unset (got " + HEADED_RAW + ")");
+    process.exit(1);
+}
+
+const DIRECT = MISSION_MODE === "direct";const MENU = MISSION_MODE === "menu" || SAVES || SOAK;
 // `intro` plays the original's intro movie in the browser and skips it with Escape.
 const MOVIE_MODE = (process.env.SMOKE_MOVIE ?? "").trim();
 if (!["", "intro"].includes(MOVIE_MODE)) {
@@ -1681,13 +1696,15 @@ async function run() {
         // --use-angle=gl forces ANGLE to use OpenGL (WebGL2) so headless Chrome
         // actually renders WebGL content. Without it, the canvas is blank.
         // --no-sandbox is needed when running as root in CI containers.
-        browser = await chromium.launch({
-            // A viewport run also pins the device pixel ratio to 1: the canvas is sized from
-            // it, and a retina screen would otherwise double the bitmap under the run.
-            args: VIEWPORT
-                ? ["--use-angle=gl", "--no-sandbox", "--force-device-scale-factor=1"]
-                : ["--use-angle=gl", "--no-sandbox"],
-        });
+        // A GPU run (web-gpu-fps) asks ANGLE for Metal and for the GPU itself instead,
+        // and fails below when the page still got a software adapter.
+        const args = GPU
+            ? ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist", "--no-sandbox"]
+            : ["--use-angle=gl", "--no-sandbox"];
+        // A viewport run also pins the device pixel ratio to 1: the canvas is sized from
+        // it, and a retina screen would otherwise double the bitmap under the run.
+        if (VIEWPORT) args.push("--force-device-scale-factor=1");
+        browser = await chromium.launch({ headless: !HEADED, args });
         // A viewport run pins the device pixel ratio to 1: the size the game reports back is
         // the canvas bitmap, and a retina screen would otherwise turn 1920x1080 into
         // 3840x2160 and read the menu's coordinates against the wrong scale. The maths at
@@ -1756,6 +1773,19 @@ async function run() {
         const gfx = gfxAdapter();
         if (gfx) console.log("osiris web: gfx backend " + gfx.backend + " adapter " + gfx.adapter);
         else console.log("osiris web: the page logged no gfx adapter line");
+        if (GPU) {
+            if (!gfx) {
+                console.error("FAIL: GPU run logged no gfx adapter line");
+                process.exitCode = 1;
+                return;
+            }
+            if (/swiftshader|llvmpipe|software|microsoft basic/i.test(gfx.adapter)) {
+                console.error("FAIL: GPU run got a software adapter: " + gfx.adapter);
+                process.exitCode = 1;
+                return;
+            }
+            console.log("osiris web: GPU run OK on " + gfx.adapter + " via " + gfx.backend);
+        }
 
         if (!foundReady) {
             console.error("FAIL: never saw 'osiris web: ready'");

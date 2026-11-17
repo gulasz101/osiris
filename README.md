@@ -98,6 +98,9 @@ choose your own Pharaoh + Cleopatra folder there and it plays in the page, and t
 your computer (nothing is uploaded). To run the same page from a checkout, run
 `scripts/pages-site.sh` and serve `out/site` with any static file server.
 
+Adding `?mission=N` to the page's address starts mission `N` straight away, as
+`--mission N` does on the desktop (`?mission=0` is Nubt, the first mission).
+
 ## Building
 
 With a recent stable Rust toolchain:

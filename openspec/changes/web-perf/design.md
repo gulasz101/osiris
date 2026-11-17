@@ -4,6 +4,39 @@ Look up first in docs-mcp (library `mdn-web-apis`): `performance.now`, `requestA
 "Synchronous and asynchronous requests". For wgpu on the web, search the `wgpu` library for
 "timestamp query" and "web". Write what you found, with the library name, in this section.
 
+### What the docs say (task 1.1)
+
+- **`mdn-web-apis`** (docs-mcp) holds only part of MDN: searches for `performance.now` and
+  `requestAnimationFrame` came back with unrelated pages (`File.lastModified`, the drag-and-drop
+  guide). So the three MDN pages were read with the `web-search` skill (Firecrawl), and the
+  quotes below are from those pages:
+  - `Performance.now()`: "returns a high resolution timestamp in milliseconds", a
+    `DOMHighResTimeStamp` with "up to microsecond precision", relative to `timeOrigin` on a
+    monotonic clock. So it is the right clock for a frame split, and no extra crate is needed.
+  - `Window.requestAnimationFrame()`: the callback runs "before the next repaint" and gets a
+    `DOMHighResTimeStamp` with "a minimal precision of 1 millisecond", equal to
+    `document.timeline.currentTime` in a window. "`requestAnimationFrame()` calls are paused in
+    most browsers when running in background tabs", which is why the soak's windows are counted
+    from `web_time::Instant` and not from a frame counter alone.
+  - Synchronous and asynchronous requests: "Synchronous requests block the execution of code
+    which causes \"freezing\" on the screen and an unresponsive user experience." That is
+    exactly what a synchronous `XMLHttpRequest` in `web/files.js` does to the frame, so the
+    lazy read's own time belongs in the frame split as `io`.
+- **`web-time` 1.1.0** (docs-mcp): `Instant::now()` "uses `Performance.now()`" on
+  `wasm32-unknown-unknown` (std's would panic), it is a drop-in for `std::time`, and
+  `-Ctarget-feature=+nontrapping-fptoint` makes it cheaper but "the vast majority of the time is
+  still spent going through JS". That last part matters: timing a frame costs a JS call per
+  reading, so the split reads the clock a handful of times per frame, not once per part of the
+  draw.
+- **`wgpu` 30.0.1** (docs-mcp): `Features::TIMESTAMP_QUERY`,
+  `TIMESTAMP_QUERY_INSIDE_ENCODERS` and `TIMESTAMP_QUERY_INSIDE_PASSES` are each "a native only
+  feature with a proposal for the web", and `PresentationTimestamp` is a native struct. So the
+  browser build cannot measure GPU time; the `render` part is CPU time spent building and
+  submitting the frame, and whatever the software GPU does afterwards lands in `other`. The web
+  pages also say `RequestAdapterOptions::compatible_surface` is "strictly required" for WebGL and
+  that `Limits::downlevel_webgl2_defaults()` is the browser's set, which is why the frame split
+  does not try to time the GPU.
+
 ## 1. The clock
 Use `web_time::Instant` (already used in `redraw`). On wasm it wraps `performance.now()`, so it
 has sub-millisecond steps in Chrome. No new dependency.

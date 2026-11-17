@@ -3,9 +3,9 @@
 ## Purpose
 Tell the truth about the browser build's frame time: log how much of each frame the game rules,
 the drawing and the game file reads take, so a slow run can be pinned on our code or on the
-browser, and keep the part that is ours small. The headless browser the smoke test runs in
-has no GPU, so a fix here is measured as "our own per-frame work went down", not as a frame
-rate a player would see on a machine with a graphics card.
+browser, and keep the part that is ours small. The headless browser the smoke test runs in reports
+the host's own GPU (see `web-gpu-fps`), but its frame rate is set by the browser's own frame pacing,
+so a fix here is measured as "our own per-frame work went down" first and as `fps` second.
 
 ## Requirements
 

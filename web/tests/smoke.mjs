@@ -1043,9 +1043,13 @@ async function run() {
             );
 
             // Set canvas dimensions before starting the game (winit reads client_width/height).
+            // The canvas starts hidden in the page and main.js shows it once the game starts;
+            // a run that starts the game itself has to show it too, or it keeps no layout and
+            // every menu click lands at its own coordinates on the page instead of the button.
             await page.evaluate(() => {
                 const canvas = document.getElementById('osiris');
                 if (canvas) {
+                    canvas.hidden = false;
                     canvas.width = 1280;
                     canvas.height = 768;
                     canvas.style.width = "1280px";
@@ -1066,8 +1070,12 @@ async function run() {
                 await page.mouse.click(640, 384);
             }
 
-            // Start the game — returns a Promise on wasm.
-            await page.evaluate(() => start_game());
+            // Start the game — returns a Promise on wasm. A wrapped run hands the folder to
+            // the page's picker, and the page has already started the game itself by now:
+            // starting it twice throws "EventLoop can't be recreated".
+            if (!WRAP) {
+                await page.evaluate(() => start_game());
+            }
 
             if (INTRO) {
                 await runIntroMovie();

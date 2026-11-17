@@ -85,6 +85,17 @@ const CLEAR: wgpu::Color = wgpu::Color {
     a: 1.0,
 };
 
+/// The backend's name for the page's log line. On the web the GL backend is WebGL2 and
+/// the WebGPU backend is WebGPU; any other backend keeps `wgpu`'s own name.
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn backend_label(backend: wgpu::Backend) -> String {
+    match backend {
+        wgpu::Backend::Gl => "WebGL2".to_string(),
+        wgpu::Backend::BrowserWebGpu => "WebGPU".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
 /// The GPU to draw with: the fast one if there is one, else any, else the system's
 /// software renderer (WARP on Windows), so a virtual machine or an old driver still
 /// gets a picture instead of no window at all.
@@ -109,7 +120,17 @@ async fn adapter(
             .await
         {
             Ok(a) => {
-                log::info!("GPU: {:?}", a.get_info());
+                let info = a.get_info();
+                log::info!("GPU: {:?}", info);
+                // The page and the smoke test read this one line to know which backend and
+                // which piece of hardware they really got: a software adapter makes a slow
+                // smoke run look like a slow game (web-gpu-fps).
+                #[cfg(target_arch = "wasm32")]
+                log::info!(
+                    "osiris web: gfx backend {} adapter {}",
+                    backend_label(info.backend),
+                    info.name
+                );
                 return Ok(a);
             }
             Err(e) => last = Some(e),
@@ -353,4 +374,20 @@ pub fn screenshot(
     }
     osiris_vfs::write(out, data)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_label_names_the_two_web_backends() {
+        // The page is the only place these two are ever seen, and the page is the one
+        // place a test cannot run, so the names are checked here on the host.
+        assert_eq!(backend_label(wgpu::Backend::Gl), "WebGL2");
+        assert_eq!(backend_label(wgpu::Backend::BrowserWebGpu), "WebGPU");
+        // Anything else keeps the backend's own name, so a wrong backend is visible.
+        assert_eq!(backend_label(wgpu::Backend::Metal), "Metal");
+        assert_eq!(backend_label(wgpu::Backend::Vulkan), "Vulkan");
+    }
 }

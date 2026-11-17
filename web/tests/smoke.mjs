@@ -342,6 +342,19 @@ function panicLine() {
 }
 
 /**
+ * The graphics backend and adapter the page started with, from its own line
+ * `osiris web: gfx backend <WebGPU|WebGL2> adapter <name>` (web-gpu-fps), or null
+ * when the page logged none.
+ */
+function gfxAdapter() {
+    for (const message of consoleMessages) {
+        const hit = message.match(/osiris web: gfx backend (\S+) adapter (.+)/);
+        if (hit) return { backend: hit[1].trim(), adapter: hit[2].trim() };
+    }
+    return null;
+}
+
+/**
  * SMOKE_MISSION=direct: the page was loaded with `?mission=3` and the game files are
  * mounted, so start the game with the mission main.js read out of the URL and check
  * the city really runs. Two different months prove the simulation advanced; the
@@ -1737,6 +1750,12 @@ async function run() {
         for (const r of requestLog) {
             if (r.startsWith("404")) console.log("REQUEST " + r);
         }
+
+        // Say once, in this run's own output, which graphics backend and adapter the page
+        // got: a software adapter explains a slow frame, and the GPU run fails on one.
+        const gfx = gfxAdapter();
+        if (gfx) console.log("osiris web: gfx backend " + gfx.backend + " adapter " + gfx.adapter);
+        else console.log("osiris web: the page logged no gfx adapter line");
 
         if (!foundReady) {
             console.error("FAIL: never saw 'osiris web: ready'");

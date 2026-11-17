@@ -133,6 +133,23 @@ thread_local! {
     /// The Mission Editor's state as JSON, filled by `main.rs` as the editor draws and read
     /// by the smoke test, which cannot see the editor's own fields.
     static DEBUG_EDITOR: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// The city's state as JSON, filled by `main.rs` as the city draws and read by the smoke
+    /// test, which cannot see the game's own fields (web-soak).
+    static DEBUG_CITY: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Keeps the city state drawn last, for the smoke test (browser only, `main.rs` calls this).
+pub fn set_debug_city(json: String) {
+    DEBUG_CITY.with(|cell| *cell.borrow_mut() = json);
+}
+
+/// The city's state as JSON, the way `main.rs` last built it: `{"idle":true,"lost":false,
+/// "paused":false,"messages":0,"dialog":false,"confirm":false,"custom":false,
+/// "tool":"none"}`.
+#[wasm_bindgen]
+pub fn debug_city() -> String {
+    DEBUG_CITY.with(|cell| cell.borrow().clone())
 }
 
 /// Keeps the editor state drawn last, for the smoke test (browser only, `main.rs` calls this).

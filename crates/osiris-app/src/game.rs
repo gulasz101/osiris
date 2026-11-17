@@ -575,6 +575,21 @@ impl Game {
             || self.custom_dialog.is_some()
     }
 
+    /// What the browser smoke test needs to see of the city, because Escape only asks
+    /// "Leave the Kingdom?" while nothing else is up (web-soak): the idle flag, whether
+    /// the city is lost or paused, and how many messages and panels are open.
+    pub fn soak_state(&self) -> (bool, bool, bool, usize, bool, bool, bool) {
+        (
+            self.idle(),
+            self.world.lost,
+            self.paused,
+            self.world.messages.len(),
+            self.dialog.is_some(),
+            self.confirm.is_some(),
+            self.custom_dialog.is_some(),
+        )
+    }
+
     pub fn update(&mut self, dt: f32) {
         self.sidebar.update(dt);
         if let Some(e) = &mut self.empire {

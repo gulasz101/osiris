@@ -1909,6 +1909,10 @@ impl App {
                 // One log line each time the month turns, for the browser smoke test.
                 #[cfg(target_arch = "wasm32")]
                 {
+                    // What is holding the city, so the smoke test can see why an Escape did
+                    // not ask "Leave the Kingdom?" (web-soak).
+                    let tool = format!("{:?}", game.tool).to_lowercase();
+                    crate::web::set_debug_city(soak::city_json(game.soak_state(), &tool));
                     let month = game.world.time.month;
                     match self.web_month {
                         Some(last) if last != month => {

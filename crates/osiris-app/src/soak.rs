@@ -96,6 +96,17 @@ pub fn editor_json(name: &str, dirty: bool, path: Option<&Path>, status: Option<
     )
 }
 
+/// The city's state as JSON, so the smoke test can see why an Escape did not ask "Leave the
+/// Kingdom?": `{"idle":true,"lost":false,"paused":false,"messages":0,"dialog":false,
+/// "confirm":false,"custom":false,"tool":"none"}`.
+pub fn city_json(state: (bool, bool, bool, usize, bool, bool, bool), tool: &str) -> String {
+    let (idle, lost, paused, messages, dialog, confirm, custom) = state;
+    format!(
+        "{{\"idle\":{idle},\"lost\":{lost},\"paused\":{paused},\"messages\":{messages},\"dialog\":{dialog},\"confirm\":{confirm},\"custom\":{custom},\"tool\":\"{}\"}}",
+        json_text(tool)
+    )
+}
+
 /// `s` as the inside of a JSON string.
 fn json_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -185,6 +196,15 @@ mod tests {
         assert_eq!(
             editor_json("Small Oasis", false, None, None, "none"),
             r#"{"name":"Small Oasis","dirty":false,"path":null,"status":null,"tool":"none"}"#
+        );
+    }
+
+    #[test]
+    fn city_json_reports_what_holds_the_city() {
+        // A city with one message open is not idle, and the line says so.
+        assert_eq!(
+            city_json((false, false, false, 1, false, false, false), "none"),
+            r#"{"idle":false,"lost":false,"paused":false,"messages":1,"dialog":false,"confirm":false,"custom":false,"tool":"none"}"#
         );
     }
 

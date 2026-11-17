@@ -715,6 +715,100 @@ function soakFps(from = 0) {
 const SPEED_STEPS = 11;
 
 /**
+ * The confirm popup's OK button on the 1280x768 canvas: `popup.rs` puts the panel 80 in
+ * from the corner of the centred 640x480 window and OK 256 right and 100 down of it, a
+ * 34 pixel button. The canvas is 1280x768 at a device pixel ratio of 1, so these are page
+ * pixels too.
+ */
+const POPUP_OK = [656 + 17, 324 + 17];
+
+/**
+ * What the game says is holding the city, as `debug_city()` returns it (web-soak): the idle
+ * flag, and the messages and panels that keep Escape from asking "Leave the Kingdom?".
+ */
+async function cityState() {
+    return page.evaluate(() => (globalThis.debug_city ? globalThis.debug_city() : "no debug_city"));
+}
+
+/** Whether the game is showing the confirm popup, from `debug_city()`'s JSON. */
+async function confirmOpen() {
+    const state = await cityState();
+    try {
+        return JSON.parse(state).confirm === true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Leaves the city the way a player does: Escape asks "Leave the Kingdom?" and the popup's OK
+ * is a click. `popup.rs` puts the panel 80 in from the corner of the centred 640x480 window
+ * and OK 256 right and 100 down of the panel's corner, and `extra` (the height of the text it
+ * asked about) moves it down, so the sweep walks the OK's column: the panel is centred, so
+ * `x` is always the canvas centre plus 33. A click that misses lands on the map and opens
+ * something, which the next Escape closes.
+ */
+async function leaveCity() {
+    const origin = await canvasOrigin();
+    for (let y = 341; y <= 421; y += 10) {
+        if (!(await confirmOpen())) {
+            await page.keyboard.press("Escape");
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            if (!(await confirmOpen())) continue;
+        }
+        const from = consoleMessages.length;
+        await clickGame(POPUP_OK[0], y);
+        const back = await until(
+            () => consoleMessages.slice(from).some((m) => m.includes("osiris web: page main") || m.includes("osiris web: page family")),
+            1_000,
+            200
+        );
+        if (back) {
+            console.log("osiris web: left the city and the menu is back (OK at y " + y + ")");
+            return true;
+        }
+    }
+    console.error("FAIL: the city never went back to a menu page, state " + (await cityState()));
+    process.exitCode = 1;
+    return false;
+}
+
+/**
+ * On Custom Missions or the editor's list: scrolls down until the row `name` is drawn,
+ * then clicks it. The list shows fifteen of the game's maps at a time, so a map past the
+ * fold needs the arrows (they are in `debug_menu_buttons()` as `Scroll(1)`).
+ */
+async function clickMap(name) {
+    let sawScroll = false;
+    let lastLabels = [];
+    for (let tries = 0; tries < 30; tries += 1) {
+        const buttons = await menuButtons();
+        lastLabels = buttons.map((b) => b.label);
+        const hit = buttons.find((b) => b.label === name && b.action.startsWith("Choose("));
+        if (hit) {
+            const origin = await canvasOrigin();
+            await page.mouse.click(origin.left + hit.x + hit.w / 2, origin.top + hit.y + hit.h / 2);
+            console.log("osiris web: clicked " + hit.action + " (" + hit.label + ")");
+            return true;
+        }
+        // The buttons are recorded as the page draws, so the page that has just opened may
+        // still report the one before it: wait for the list's own arrow instead of giving up.
+        if (buttons.some((b) => b.action === "Scroll(1)")) {
+            sawScroll = true;
+            await clickMenu("Scroll(1)");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    console.error(
+        "FAIL: no row named " + JSON.stringify(name) + " on the list" +
+        (sawScroll ? "" : "; the list never showed its scroll arrows") +
+        "; the page had " + JSON.stringify(lastLabels.slice(0, 20))
+    );
+    process.exitCode = 1;
+    return false;
+}
+
+/**
  * Waits for the soak run's months, pressing Escape so a message that opens does not stop
  * the clock. Fails on a panic, on a month that takes more than the 60 s of the issue, and
  * on the app's line that the memory grew every month for twelve months in a row.
@@ -797,6 +891,46 @@ async function runSoakMission() {
     console.log(
         "osiris web: soak OK (" + numbers.months + " months, min fps " + numbers.minFps +
         ", memory start " + numbers.start + " MB end " + numbers.end + " MB)"
+    );
+
+    // ── Second run: a custom map from `Maps/` (design 7) ────────────────────
+    if (!(await leaveCity())) return;
+    if (!(await clickMenuTo("Go(Custom)", "custom"))) {
+        console.error("FAIL: the custom missions page never came up");
+        process.exitCode = 1;
+        return;
+    }
+    if (!(await clickMap("Small Oasis"))) return;
+    const customFrom = consoleMessages.length;
+    await clickMenu("Choose(StartMap)");
+    const started = await until(
+        () => panicLine() !== null || consoleMessages.slice(customFrom).some((m) => m.includes("osiris web: city ") && m.includes(" started")),
+        120_000,
+        500
+    );
+    if (!started) {
+        console.error("FAIL: the custom map never started a city");
+        process.exitCode = 1;
+        return;
+    }
+    // A city starts at 70% again, so the ladder's top is the same eleven presses.
+    const customOrigin = await canvasOrigin();
+    await page.mouse.click(customOrigin.left + 640, customOrigin.top + 384);
+    for (let i = 0; i < SPEED_STEPS; i += 1) await page.keyboard.press("BracketRight");
+    console.log("osiris web: custom map run started at the fastest game speed");
+
+    if (!(await soakWait(6, customFrom, "the custom map run"))) return;
+    // The FPS line comes every ten seconds of real time, and six months at the fastest speed
+    // can be quicker than that: wait for one before reading the numbers.
+    await until(() => soakFps(customFrom).length > 0, 25_000, 500);
+    for (const message of consoleMessages.slice(customFrom)) console.log(message);
+    const customMonths = soakMonths(customFrom).slice(0, 6);
+    const customRates = soakFps(customFrom);
+    const mapNumbers = soakSummary(customMonths, customRates, "the custom map run");
+    if (!mapNumbers) return;
+    console.log(
+        "osiris web: custom map soak OK (" + mapNumbers.months + " months on Small Oasis, min fps " +
+        mapNumbers.minFps + ", memory start " + mapNumbers.start + " MB end " + mapNumbers.end + " MB)"
     );
 }
 

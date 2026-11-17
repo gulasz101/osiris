@@ -50,6 +50,9 @@ node web/tests/fit-test.mjs
 echo "== opfs test"
 node web/tests/opfs-test.mjs
 
+echo "== saves test"
+node web/tests/saves-test.mjs
+
 echo "== cargo test"
 cargo test --workspace --quiet
 

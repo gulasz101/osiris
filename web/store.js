@@ -31,8 +31,24 @@
     });
   }
 
-  /** @returns {Promise<[string, Uint8Array][]>} */
-  function loadAll() {
+  // Each `/user` file is kept as `{ bytes, at }`: the bytes and when they were written.
+  // A page from before the Saves panel stored the bare ArrayBuffer or Uint8Array, and those
+  // are still read; they simply have no time.
+
+  /** The bytes of a stored value, whichever shape it has. */
+  function bytesOf(value) {
+    var bytes = value && value.bytes !== undefined ? value.bytes : value;
+    if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+    return bytes;
+  }
+
+  /** When a stored value was written, in `Date.now()` milliseconds; 0 when it has no time. */
+  function atOf(value) {
+    return value && typeof value.at === "number" ? value.at : 0;
+  }
+
+  /** Every stored `[path, value]` pair, in the store's own order. */
+  function readAll() {
     if (!db) return Promise.resolve([]);
     return new Promise(function (resolve, reject) {
       var tx = db.transaction("user", "readonly");
@@ -55,16 +71,34 @@
         if (!keysDone || !valsDone) return;
         var out = [];
         for (var i = 0; i < keysResult.length; i++) {
-          var key = String(keysResult[i]);
-          var val = valsResult[i];
-          if (val instanceof ArrayBuffer) {
-            out.push([key, new Uint8Array(val)]);
-          } else {
-            out.push([key, val]);
-          }
+          out.push([String(keysResult[i]), valsResult[i]]);
         }
         resolve(out);
       }
+    });
+  }
+
+  /** @returns {Promise<[string, Uint8Array][]>} */
+  function loadAll() {
+    return readAll().then(function (pairs) {
+      return pairs.map(function (pair) { return [pair[0], bytesOf(pair[1])]; });
+    });
+  }
+
+  /**
+   * When each stored file was written, for the Saves panel's date column.
+   *
+   * @returns {Promise<Object<string, number>>} path to `Date.now()` milliseconds; a file
+   * written by an older page is left out and the panel shows no date for it.
+   */
+  function dates() {
+    return readAll().then(function (pairs) {
+      var out = {};
+      for (var i = 0; i < pairs.length; i++) {
+        var at = atOf(pairs[i][1]);
+        if (at > 0) out[pairs[i][0]] = at;
+      }
+      return out;
     });
   }
 
@@ -75,7 +109,7 @@
       return new Promise(function (resolve, reject) {
         var tx = db.transaction("user", "readwrite");
         var store = tx.objectStore("user");
-        var req = store.put(copy, path);
+        var req = store.put({ bytes: copy, at: Date.now() }, path);
         req.onsuccess = function () { resolve(); };
         req.onerror = function () {
           console.error("osiris store: put failed", req.error);
@@ -108,5 +142,12 @@
     return chain.catch(function () {});
   }
 
-  globalThis.osirisStore = { open: open, loadAll: loadAll, put: put, del: del, idle: idle };
+  globalThis.osirisStore = {
+    open: open,
+    loadAll: loadAll,
+    dates: dates,
+    put: put,
+    del: del,
+    idle: idle,
+  };
 })();

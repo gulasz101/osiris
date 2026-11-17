@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -47,6 +48,62 @@ struct Entry {
     seq: u64,
 }
 
+/// The most bytes of lazy reads the store keeps: 32 MiB of the game's own files, read from
+/// the browser once and then out of memory (`web-perf`).
+const LAZY_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+/// A lazy file bigger than this is read every time it is opened. A movie or a big archive is
+/// not worth keeping, and keeping it would push everything else out of the cache.
+const LAZY_CACHE_MAX_FILE: usize = 8 * 1024 * 1024;
+
+/// The lazy reads the store has kept, least recently read first.
+///
+/// A city's ambient sound is opened again every time it plays: without this, each open is a
+/// synchronous read through the page, on the main thread, in the middle of a frame.
+#[derive(Default)]
+struct LazyCache {
+    /// The bytes kept, least recently read first, and the path each one was read for.
+    entries: Vec<(String, Arc<[u8]>)>,
+    /// How many bytes `entries` holds.
+    bytes: usize,
+}
+
+impl LazyCache {
+    /// The bytes kept for `key`, moved to the back as the most recently read.
+    fn get(&mut self, key: &str) -> Option<Arc<[u8]>> {
+        let at = self.entries.iter().position(|(path, _)| path == key)?;
+        let (path, bytes) = self.entries.remove(at);
+        let bytes = bytes.clone();
+        self.entries.push((path, bytes.clone()));
+        Some(bytes)
+    }
+
+    /// Keeps `bytes` for `key`, dropping the least recently read files until it fits. A file
+    /// over [`LAZY_CACHE_MAX_FILE`] is not kept at all.
+    fn keep(&mut self, key: String, bytes: Arc<[u8]>) {
+        if bytes.len() > LAZY_CACHE_MAX_FILE {
+            return;
+        }
+        while self.bytes + bytes.len() > LAZY_CACHE_BYTES {
+            if self.entries.is_empty() {
+                return;
+            }
+            let (_, dropped) = self.entries.remove(0);
+            self.bytes -= dropped.len();
+        }
+        self.bytes += bytes.len();
+        self.entries.push((key, bytes));
+    }
+
+    /// Forgets the bytes kept for `key`: the file there changed, or was mounted again.
+    fn forget(&mut self, key: &str) {
+        if let Some(at) = self.entries.iter().position(|(path, _)| path == key) {
+            let (_, dropped) = self.entries.remove(at);
+            self.bytes -= dropped.len();
+        }
+    }
+}
+
 /// An in-memory virtual file system with case-insensitive lookups.
 ///
 /// Paths are normalised by converting `\` to `/`, resolving `.` and `..`,
@@ -67,6 +124,8 @@ pub struct MemFs {
     watch_prefix: Option<String>,
     /// Recorded changes since the last call to [`Self::take_changes`].
     changes: Vec<Change>,
+    /// The lazy reads kept in memory, so a file opened twice is read from the browser once.
+    lazy_cache: RefCell<LazyCache>,
 }
 
 // ── Normalisation ────────────────────────────────────────────────────
@@ -145,6 +204,9 @@ impl MemFs {
     /// session's memory holds only what the game is using at that moment.
     pub fn mount_lazy(&mut self, path: &str, len: u64) {
         let norm = normalise(path);
+        // A file mounted again is read again: whatever the cache holds for this path is the
+        // bytes of the file that was there before.
+        self.lazy_cache.borrow_mut().forget(&norm);
         self.seq += 1;
         self.files.insert(
             norm.clone(),
@@ -201,18 +263,23 @@ impl MemFs {
 
     /// Read bytes from the store. Returns `None` if missing.
     ///
-    /// A lazy entry's bytes come from the reader set with [`Self::set_lazy_reader`] and are
-    /// not kept: a file the game reads twice is read from the browser twice. Without a
-    /// reader a lazy entry reads as missing, which is what callers already turn into
-    /// `NotFound`.
+    /// A lazy entry's bytes come from the reader set with [`Self::set_lazy_reader`]. They are
+    /// kept (up to [`LAZY_CACHE_BYTES`], and never a file over [`LAZY_CACHE_MAX_FILE`]), so a
+    /// file the game opens again is read from the browser once (`web-perf`). Without a reader
+    /// a lazy entry reads as missing, which is what callers already turn into `NotFound`.
     pub fn read(&self, path: &str) -> Option<Arc<[u8]>> {
-        let entry = self.files.get(&normalise(path))?;
+        let norm = normalise(path);
+        let entry = self.files.get(&norm)?;
         match &entry.data {
             Data::Bytes(bytes) => Some(bytes.clone()),
             Data::Lazy { .. } => {
+                if let Some(bytes) = self.lazy_cache.borrow_mut().get(&norm) {
+                    return Some(bytes);
+                }
                 let reader = self.lazy_reader?;
-                let bytes = reader(&entry.original)?;
-                Some(Arc::from(bytes.into_boxed_slice()))
+                let bytes: Arc<[u8]> = Arc::from(reader(&entry.original)?.into_boxed_slice());
+                self.lazy_cache.borrow_mut().keep(norm, bytes.clone());
+                Some(bytes)
             }
         }
     }
@@ -559,6 +626,8 @@ mod tests {
     thread_local! {
         /// How many times `counting_reader` has been asked, on this test's own thread.
         static LAZY_CALLS: Cell<usize> = const { Cell::new(0) };
+        /// How many bytes `sized_reader` answers with, for the cache's size rules.
+        static LAZY_SIZE: Cell<usize> = const { Cell::new(0) };
     }
 
     /// A reader for the lazy tests: it answers for one path only, in the spelling it was
@@ -574,7 +643,21 @@ mod tests {
         })
     }
 
-    /// A test that counts reads starts from zero: the counter is this thread's own.
+    /// A reader for the cache's size rules: it answers every path with [`LAZY_SIZE`] bytes,
+    /// the last one counting the read, so a caller can tell the reads apart.
+    fn sized_reader(_path: &str) -> Option<Vec<u8>> {
+        LAZY_CALLS.with(|calls| {
+            calls.set(calls.get() + 1);
+            let n = LAZY_SIZE.with(Cell::get);
+            let mut bytes = vec![0u8; n];
+            if let Some(last) = bytes.last_mut() {
+                *last = calls.get() as u8;
+            }
+            Some(bytes)
+        })
+    }
+
+    /// A test that counts reads starts from zero: the counters are this thread's own.
     fn counting_fs() -> MemFs {
         LAZY_CALLS.with(|calls| calls.set(0));
         let mut fs = MemFs::default();
@@ -582,15 +665,67 @@ mod tests {
         fs
     }
 
+    /// A store whose lazy files all answer with `size` bytes (`sized_reader`).
+    fn sized_fs(size: usize) -> MemFs {
+        LAZY_CALLS.with(|calls| calls.set(0));
+        LAZY_SIZE.with(|s| s.set(size));
+        let mut fs = MemFs::default();
+        fs.set_lazy_reader(Some(sized_reader));
+        fs
+    }
+
     #[test]
-    fn lazy_read_asks_the_reader_every_time() {
+    fn lazy_read_keeps_a_small_file_and_reads_it_from_browser_once() {
         let mut fs = counting_fs();
         fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
         assert!(fs.is_file("/pharaohdata/data/lazy.sg3"));
 
         // The reader is given the original path, whatever spelling the game looked up.
         assert_eq!(fs.read("/pharaohdata/DATA/lazy.sg3").as_deref(), Some(&b"read 1"[..]));
-        // Nothing is kept: the second read asks again and gets the second answer.
+        // The bytes are kept, so the second read, in another spelling, asks for nothing.
+        assert_eq!(fs.read("/PharaohData/Data/Lazy.SG3").as_deref(), Some(&b"read 1"[..]));
+        assert_eq!(LAZY_CALLS.with(Cell::get), 1);
+    }
+
+    #[test]
+    fn lazy_read_of_a_big_file_asks_the_reader_every_time() {
+        let size = LAZY_CACHE_MAX_FILE + 1;
+        let mut fs = sized_fs(size);
+        fs.mount_lazy("/PharaohData/Data/Movie.BIK", size as u64);
+
+        assert_eq!(fs.read("/PharaohData/Data/Movie.BIK").map(|b| b.len()), Some(size));
+        // Over the per-file limit nothing is kept: a movie is read again, not held.
+        assert_eq!(fs.read("/PharaohData/Data/Movie.BIK").map(|b| b.len()), Some(size));
+        assert_eq!(LAZY_CALLS.with(Cell::get), 2);
+    }
+
+    #[test]
+    fn lazy_cache_drops_the_least_recently_read_when_it_is_full() {
+        // Five files of 7 MiB do not fit in the 32 MiB budget, so the first is dropped.
+        let size = 7 * 1024 * 1024;
+        let mut fs = sized_fs(size);
+        let names: Vec<String> = (0..5).map(|i| format!("/PharaohData/Data/F{i}.SG3")).collect();
+        for name in &names {
+            fs.mount_lazy(name, size as u64);
+            assert_eq!(fs.read(name).map(|b| b.len()), Some(size));
+        }
+        assert_eq!(LAZY_CALLS.with(Cell::get), 5);
+
+        // The second file is still kept: reading it asks for nothing.
+        assert!(fs.read(&names[1]).is_some());
+        assert_eq!(LAZY_CALLS.with(Cell::get), 5);
+        // The first was the least recently read, so it was dropped and is read again.
+        assert!(fs.read(&names[0]).is_some());
+        assert_eq!(LAZY_CALLS.with(Cell::get), 6);
+    }
+
+    #[test]
+    fn mounting_a_lazy_file_again_reads_it_again() {
+        let mut fs = counting_fs();
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
+        assert_eq!(fs.read("/PharaohData/Data/Lazy.SG3").as_deref(), Some(&b"read 1"[..]));
+        // A second mount is a different file at the same path, so the kept bytes are gone.
+        fs.mount_lazy("/PharaohData/Data/Lazy.SG3", 6);
         assert_eq!(fs.read("/PharaohData/Data/Lazy.SG3").as_deref(), Some(&b"read 2"[..]));
         assert_eq!(LAZY_CALLS.with(Cell::get), 2);
     }

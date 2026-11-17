@@ -1767,7 +1767,14 @@ impl App {
                     self.screen = Some(Screen::Menu(menu));
                 }
                 #[cfg(target_arch = "wasm32")]
-                log::info!("osiris web: main menu");
+                {
+                    log::info!("osiris web: main menu");
+                    // The issue asks for the time from the pick to this line, so a player can
+                    // see what the page spent on reading the game files and starting up.
+                    if let Some(ms) = crate::web::since_pick_ms() {
+                        log::info!("osiris web: menu after {} ms", ms.round() as i64);
+                    }
+                }
             }
         }
         if let Some(a) = &self.audio

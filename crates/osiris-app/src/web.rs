@@ -1,8 +1,32 @@
 //! Browser entry point for Osiris on wasm32.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use wasm_bindgen::prelude::*;
+
+// ── How long the start took ────────────────────────────────────────
+
+thread_local! {
+    /// When the player picked their folder (or when the page loaded, if the files came
+    /// from browser storage), in `performance.now()` milliseconds. The pick happens in
+    /// `main.js` and the main menu is built in the program, so the time is handed over once.
+    static PICK_AT: Cell<Option<f64>> = const { Cell::new(None) };
+}
+
+/// Remember when the player picked their folder, in `performance.now()` milliseconds
+/// (browser only; `main.js` calls this when the page loads and again at every pick).
+#[wasm_bindgen]
+pub fn set_pick_time(at: f64) {
+    PICK_AT.with(|cell| cell.set(Some(at)));
+}
+
+/// Milliseconds from the pick to now, or `None` when nothing set the time.
+pub fn since_pick_ms() -> Option<f64> {
+    let at = PICK_AT.with(|cell| cell.get())?;
+    let now = web_sys::window()?.performance()?.now();
+    Some((now - at).max(0.0))
+}
 
 // ── Debug audio for the smoke test ──────────────────────────────────
 

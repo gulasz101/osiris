@@ -46,6 +46,21 @@
             border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 0.3em; cursor: pointer;
         }
         #forget:hover { color: #1a1a2e; background: #ffd700; }
+        /* The bar over everything while the game files are read: it covers the canvas, or
+           the start page before the game starts, so the page never looks dead. It takes no
+           clicks, so a folder can still be dropped on the page under it. */
+        #progress {
+            position: fixed; inset: 0; z-index: 3; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 0.6em;
+            background: rgba(26, 26, 46, 0.85); pointer-events: none;
+        }
+        #progress[hidden] { display: none; }
+        #progress-track {
+            width: min(60ch, 80vw); height: 1em; border: 1px solid #ffd700;
+            border-radius: 0.3em; overflow: hidden;
+        }
+        #progress-fill { width: 0; height: 100%; background: #ffd700; }
+        #progress-text { color: #ffd700; }
     </style>
 </head>
 <body>
@@ -58,6 +73,10 @@
         <p id="status"></p>
     </div>
     <button id="forget" hidden>Forget game files</button>
+    <div id="progress" hidden>
+        <div id="progress-track"><div id="progress-fill"></div></div>
+        <p id="progress-text"></p>
+    </div>
     <div id="controls" hidden>
         <button id="fullscreen">Fullscreen</button>
         <button id="page">Page</button>

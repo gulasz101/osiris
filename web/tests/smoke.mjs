@@ -77,8 +77,21 @@ if (VIEWPORT && (INTRO || WRAP !== "" || REMEMBER)) {
     console.error("FAIL: SMOKE_VIEWPORT runs on its own, with no SMOKE_MOVIE, SMOKE_WRAP or SMOKE_REMEMBER");
     process.exit(1);
 }
-// The game is started by the page itself in a wrapped or viewport run, from the picker.
-const PICK = WRAP !== "" || VIEWPORT !== null;
+// `1` hands the staged files to the page's own folder picker, so the page's reading path
+// (its progress bar and its read time) is what runs, and then goes on with the ordinary
+// checks. `design.md` records the numbers this mode measured.
+const PICK_RAW = (process.env.SMOKE_PICK ?? "").trim();
+const PICK_MODE = PICK_RAW === "1";
+if (PICK_RAW !== "" && !PICK_MODE) {
+    console.error("FAIL: SMOKE_PICK must be 1 or unset (got " + PICK_RAW + ")");
+    process.exit(1);
+}
+if (PICK_MODE && REMEMBER) {
+    console.error("FAIL: SMOKE_PICK runs with no SMOKE_REMEMBER, which reads the picker itself");
+    process.exit(1);
+}
+// The game is started by the page itself in a wrapped, viewport or picker run.
+const PICK = WRAP !== "" || VIEWPORT !== null || PICK_MODE;
 
 // Every request the page made, so a missing file shows up instead of hiding
 // behind a blank page.
@@ -200,6 +213,82 @@ async function until(predicate, ms, step = 250) {
         await new Promise((resolve) => setTimeout(resolve, step));
     }
     return predicate();
+}
+
+/**
+ * Watch `#progress` from before the picker is given the folder: every line the bar shows
+ * is kept in the page, so a read that finishes between two polls still leaves proof that
+ * the bar was up.
+ */
+async function watchProgress() {
+    await page.evaluate(() => {
+        const element = document.getElementById("progress");
+        globalThis.osirisProgressSeen = [];
+        const note = () => {
+            if (!element || element.hidden) return;
+            const text = document.getElementById("progress-text");
+            if (text && text.textContent) globalThis.osirisProgressSeen.push(text.textContent);
+        };
+        note();
+        new MutationObserver(note).observe(element, {
+            attributes: true, childList: true, subtree: true, characterData: true,
+        });
+    });
+}
+
+/** One line of the bar: `Reading game files: 412 / 1335 (31%)`. */
+const BAR_LINE = /^Reading game files: (\d+) \/ (\d+) \(\d+%\)$/;
+
+/**
+ * Take `/tmp/osiris-web-loading.png` while the bar is up, and say what the bar read.
+ * Returns `{ text, bytes }` when the shot has the bar on it, `{ text, seen, gone }` when
+ * the read finished before the shot could be taken, and null when the bar never appeared.
+ */
+async function captureLoading(shotFile) {
+    const deadline = Date.now() + 300_000;
+    let shownAt = 0;
+    while (Date.now() < deadline) {
+        const state = await page.evaluate(() => {
+            const element = document.getElementById("progress");
+            const text = document.getElementById("progress-text");
+            return {
+                shown: !!element && !element.hidden,
+                text: text ? text.textContent : "",
+                seen: globalThis.osirisProgressSeen ?? [],
+            };
+        });
+        const hit = BAR_LINE.exec(state.text);
+        if (hit && state.shown) {
+            if (!shownAt) shownAt = Date.now();
+            // Shoot as soon as the bar has moved off zero (its first repaint, 100 ms in),
+            // or after half a second if it has not, so the shot always has the bar on it.
+            if (Number(hit[1]) > 0 || Date.now() - shownAt >= 500) {
+                await page.screenshot({ path: shotFile, fullPage: false });
+                return { text: state.text, bytes: fs.statSync(shotFile).size };
+            }
+        } else if (state.seen.length > 0) {
+            // Hidden again after it had drawn: the read beat the shot.
+            return { text: state.seen[state.seen.length - 1], seen: state.seen, gone: true };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return null;
+}
+
+/**
+ * Whether a run that reached the main menu also logged how long the start took:
+ * `osiris web: menu after N ms`, where `N` counts from the pick (or from the page loading
+ * when the files came from browser storage).
+ */
+function checkMenuTime() {
+    const line = consoleMessages.find((m) => m.includes("osiris web: menu after "));
+    const ms = Number(/osiris web: menu after (\d+) ms/.exec(line ?? "")?.[1] ?? NaN);
+    if (!Number.isFinite(ms)) {
+        console.error("FAIL: the main menu came up without 'osiris web: menu after N ms'");
+        return false;
+    }
+    console.log("osiris web: menu time OK (" + ms + " ms from the pick to the main menu)");
+    return true;
 }
 
 /** The distinct `osiris web: city month <n>` values in the console log, in order. */
@@ -372,6 +461,8 @@ async function runRemember(stagingDir) {
     } else if (!menu) {
         console.error("FAIL: never saw 'osiris web: main menu' after restoring the game files");
         process.exitCode = 1;
+    } else if (!checkMenuTime()) {
+        process.exitCode = 1;
     } else {
         console.log("osiris web: remember OK (" + restoredCount + " files)");
     }
@@ -462,6 +553,7 @@ async function skipIntro() {
 async function runMenuMission() {
     // The intro is the first screen of a fresh start, so it is in the way here too.
     await skipIntro();
+    if (!checkMenuTime()) process.exitCode = 1;
     const family = await waitPage("family", 60_000, 0);
     if (!family) {
         console.error("FAIL: the registry page never came up");
@@ -1233,11 +1325,38 @@ async function run() {
                 // two folders above the game files and a stray file next to them, which must be
                 // skipped without being read.
                 if (WRAP) fs.writeFileSync(path.join(stagingDir, WRAP, "stray.zip"), Buffer.from([0, 1, 2]));
+                // The bar has to be watched before the picker is given the folder: the read
+                // starts as soon as the picker changes.
+                await watchProgress();
                 await page.setInputFiles("#folder", stagingDir).catch((err) => {
                     console.error("FAIL: could not give the picker " + stagingDir + ": " + err.message);
                     process.exitCode = 1;
                 });
                 if (process.exitCode === 1) return;
+
+                // The screenshot the issue asks for, taken while the files are still being
+                // read, so the bar is on it.
+                const loading = await captureLoading("/tmp/osiris-web-loading.png");
+                if (!loading) {
+                    console.error("FAIL: the page never showed the progress bar while it read the game files");
+                    process.exitCode = 1;
+                    return;
+                }
+                if (loading.gone) {
+                    console.error(
+                        "FAIL: the files were read before the loading screenshot could be taken" +
+                        " (the bar last read " + JSON.stringify(loading.text) + ")"
+                    );
+                    console.error("FAIL: the page says " + JSON.stringify(await page.evaluate(() =>
+                        document.getElementById("status").textContent)));
+                    for (const m of consoleMessages.slice(messageMark)) console.log(m);
+                    process.exitCode = 1;
+                    return;
+                }
+                console.log(
+                    "osiris web: loading bar OK (" + loading.text +
+                    ", /tmp/osiris-web-loading.png " + loading.bytes + " bytes)"
+                );
 
                 const found = await until(
                     () => consoleMessages.some((m) => m.includes("osiris web: game root '")),
@@ -1384,6 +1503,7 @@ async function run() {
                 console.error("FAIL: never saw 'osiris web: main menu'");
                 process.exitCode = 1;
             } else {
+                if (!checkMenuTime()) process.exitCode = 1;
                 // Real game sound (web-sound task 1.9): the game's own audio must be running
                 // and no track or effect may have failed to open.
                 const audioState = await page.evaluate(() =>

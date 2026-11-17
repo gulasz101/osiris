@@ -97,6 +97,6 @@ Filled in as the tasks are done; the machine is Wojtek's Mac, the data folder is
 
 | what | before | after |
 |---|---|---|
-| wasm size, `web/pkg/osiris_bg.wasm` | 13,739,637 bytes (release build) | see 1.6 |
-| reading the files, one at a time | see 1.3 | - |
-| picking the folder to the main menu | see 1.3 | see 1.4 |
+| wasm size, `web/pkg/osiris_bg.wasm` | 13,739,637 bytes (release build) | see 1.7 |
+| reading the 1335 files, one at a time | 3,776 / 4,141 / 5,333 ms over three runs (the disk cache moves it) | see 1.5 |
+| picking the folder to the main menu | 4,256 ms | see 1.5 |

@@ -5,11 +5,13 @@ import init, {
     mount_exact,
     mount_file,
     mount_user_file,
+    set_pick_time,
     start_game,
 } from "./pkg/osiris.js";
 import { filesFromDrop, filesFromInput, filesUnder, findGameRoot } from "./folder.js";
 import { fitSize } from "./fit.js";
 import { forget as forgetGameFiles, restore as restoreGameFiles, save as saveGameFiles } from "./opfs.js";
+import { createBar, readAll } from "./progress.js";
 
 let busy = false;
 
@@ -27,6 +29,8 @@ const forgetButton = document.getElementById("forget");
 const controls = document.getElementById("controls");
 const fullscreenButton = document.getElementById("fullscreen");
 const pageButton = document.getElementById("page");
+// The bar over everything while the game files are read.
+const progress = createBar(document.getElementById("progress"));
 
 // `?mission=N` starts that mission straight away, as `osiris --mission N` does on the
 // desktop. A value that is not a whole number is refused before the game starts.
@@ -55,6 +59,9 @@ globalThis.osirisMission = mission;
 
 try {
     await init();
+    // A visit that restores the game files from browser storage never picks a folder, so
+    // the page loading is its start. A pick sets the clock again in `loadFolder`.
+    set_pick_time(performance.now());
     console.log("osiris web: ready");
 } catch (err) {
     console.error(err);
@@ -245,6 +252,10 @@ async function loadFolder(list) {
         return;
     }
 
+    // The game logs how long it took from here to its main menu, and the number is only
+    // meaningful if the clock starts at the pick rather than at the page loading.
+    set_pick_time(performance.now());
+
     // The game root is wherever inside the chosen folder `Data/Pharaoh_General.sg3` is,
     // so the player may pick the GOG folder or any folder above the game files.
     const root = findGameRoot(list);
@@ -262,16 +273,23 @@ async function loadFolder(list) {
         files.length + " of " + list.length + " files"
     );
 
+    const started = performance.now();
+
     // Everything under the root is mounted under /PharaohData, the folder `start_game`
     // looks for, so the game does not care how deep the root sat in the chosen folder.
-    for (let i = 0; i < files.length; i++) {
-        const entry = files[i];
-        const buf = await entry.file.arrayBuffer();
-        mount_file("PharaohData/" + entry.path, new Uint8Array(buf));
-        if (i % 50 === 0 || i === files.length - 1) {
-            status.textContent = "Reading " + (i + 1) + " of " + files.length + " files...";
-        }
-    }
+    // The bar says how far the read has got, and `readAll` keeps a few reads going at
+    // the same time; `design.md` records why the limit is the one it is.
+    await readAll(
+        files,
+        (entry) => entry.file.arrayBuffer(),
+        (entry, bytes) => mount_file("PharaohData/" + entry.path, new Uint8Array(bytes)),
+        progress,
+        1
+    );
+    console.log(
+        "osiris web: read " + files.length + " files in " +
+        Math.round(performance.now() - started) + " ms"
+    );
 
     try {
         start();

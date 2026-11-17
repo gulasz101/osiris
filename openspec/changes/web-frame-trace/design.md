@@ -111,7 +111,55 @@ Plain node, no dependency. It reads the JSON array and:
   run.
 
 ## 4. The numbers (task 1.4)
-To be filled from the run.
+`SMOKE_TRACE=/tmp/osiris-trace.json SMOKE_GPU=1 OSIRIS_DATA=<folder> scripts/web-smoke.sh` ran the
+city for 20 s on `ANGLE Metal Renderer: Apple M1` and printed the soak's own
+`trace run min fps 5`, `frame ms sim 8.4 render 2.6 io 0.1 other 173.9`, then
+`trace OK (20 s of the city, 37878 events)`. `scripts/trace-top.mjs` on the file printed:
+
+```
+37878 events, 23912 complete slices, 20116.4 ms of trace
+main thread 60212:259 (the most RunTask time), 7270 slices, 8661.5 ms of work
+
+ total ms   count  name
+   2434.2    1631  RunTask
+   2387.1    1631  ThreadControllerImpl::RunTask
+   2116.3     617  FunctionCall
+   1364.2     108  FireAnimationFrame
+     40.4      56  RunMicrotasks
+     34.2      88  V8.HandleInterrupts
+     32.7      26  V8.StackGuard
+     32.0      64  Receive mojo reply
+     31.9     108  Commit
+     31.5       2  V8.InvokeApiInterruptCallbacks
+
+rAF gap: mean 187.1 ms over 108 callbacks (median 201.8 ms, worst 220.8 ms, best 35.1 ms)
+frame pacing: 1162 BeginFrame (one every 17.3 ms), 1054 DroppedFrame, 108 RequestMainThreadFrame (one every 187.1 ms)
+```
+
+The two wrapper slices are the event loop itself; the work inside them is `FunctionCall`, our
+wasm frame, 2.1 s of the 20 s across 108 frames (about 12.6 ms each). The main thread is idle the
+other 88% of the window. The frame pacing line says why: frames are offered at 60 Hz, 1054 of
+1162 are dropped before they run, and the browser requests a main-thread frame only once every
+187.1 ms — 108 times, the same count as the rAF callbacks and the same interval as `other`.
 
 ## 5. The cause and the fix (task 1.5)
-To be filled from the trace.
+**The top slice is not ours, and no slice is.** Our share of the wall clock is `FunctionCall` at
+about 105 ms per second, which is one frame in five. The gap between frames is not spent in any
+main-thread slice: it is the browser deciding not to run a frame at all
+(`DroppedFrame` on the compositor thread), and Chrome's own `PipelineReporter` puts the high-latency
+frames in `EndActivateToSubmitCompositorFrame` (mean 87 ms), a compositor stage that never runs our
+code.
+
+A blank page with no wasm, no canvas and no game files gets the same treatment from the same
+Chrome: `requestAnimationFrame` every 176-195 ms in five configurations, GPU and software, headed
+and headless, with `--disable-frame-rate-limit` and with the occlusion and backgrounding flags.
+This machine has no display attached, and a display-less Chrome offers every page about five
+frames a second.
+
+So the change stops where the plan said it would: no game code is touched, and the proposed fix is
+to read `min fps` next to the rAF gap `scripts/trace-top.mjs` prints and to repeat the soak on a
+machine with a real display before tuning anything. If that soak shows the interval still far
+above `sim` plus `render`, the next change belongs to the browser's frame source rather than to
+Osiris; the only lever in reach is to stop driving redraws from `requestAnimationFrame`, which would
+trade vsync on a player's machine for speed on this host, and that is a design decision for the
+plan, not a tracing change.

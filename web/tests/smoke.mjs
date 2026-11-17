@@ -97,21 +97,26 @@ if (WRAP !== "" && (INTRO || MENU)) {
 // own picker, so `main.js` is what sizes the canvas. The run then checks that the canvas is
 // the window, that the game resized its surface to it, that the city fills the frame, and
 // that a smaller window is filled too.
+// Comma-separated values like `1366x630,800x600,1920x1080` test each size in sequence.
 const VIEWPORT_RAW = (process.env.SMOKE_VIEWPORT ?? "").trim();
 let VIEWPORT = null;
 if (VIEWPORT_RAW !== "") {
-    const match = /^(\d{2,5})x(\d{2,5})$/.exec(VIEWPORT_RAW);
-    if (!match) {
-        console.error("FAIL: SMOKE_VIEWPORT must be WIDTHxHEIGHT like 1920x1080 (got " + VIEWPORT_RAW + ")");
-        process.exit(1);
+    const sizes = VIEWPORT_RAW.split(",");
+    VIEWPORT = [];
+    for (const raw of sizes) {
+        const match = /^(\d{2,5})x(\d{2,5})$/.exec(raw.trim());
+        if (!match) {
+            console.error("FAIL: SMOKE_VIEWPORT must be WIDTHxHEIGHT like 1920x1080 (got " + raw.trim() + ")");
+            process.exit(1);
+        }
+        VIEWPORT.push({ width: Number(match[1]), height: Number(match[2]) });
     }
-    VIEWPORT = { width: Number(match[1]), height: Number(match[2]) };
 }
-if (VIEWPORT && !MENU) {
+if ((VIEWPORT?.length ?? 0) > 0 && !MENU) {
     console.error("FAIL: SMOKE_VIEWPORT runs with SMOKE_MISSION=menu");
     process.exit(1);
 }
-if (VIEWPORT && (INTRO || WRAP !== "" || REMEMBER)) {
+if ((VIEWPORT?.length ?? 0) > 0 && (INTRO || WRAP !== "" || REMEMBER)) {
     console.error("FAIL: SMOKE_VIEWPORT runs on its own, with no SMOKE_MOVIE, SMOKE_WRAP or SMOKE_REMEMBER");
     process.exit(1);
 }
@@ -129,8 +134,8 @@ if (PICK_MODE && REMEMBER) {
     process.exit(1);
 }
 // The game is started by the page itself in a wrapped, viewport or picker run.
-const PICK = WRAP !== "" || VIEWPORT !== null || PICK_MODE;
-if (SAVES && (DIRECT || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE)) {
+const PICK = WRAP !== "" || (VIEWPORT?.length ?? 0) > 0 || PICK_MODE;
+if (SAVES && (DIRECT || INTRO || WRAP !== "" || REMEMBER || (VIEWPORT?.length ?? 0) > 0 || PICK_MODE)) {
     console.error("FAIL: SMOKE_SAVES runs with no SMOKE_MISSION, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT or SMOKE_PICK");
     process.exit(1);
 }
@@ -144,12 +149,12 @@ if (SYNCREAD_RAW !== "" && !SYNCREAD) {
     console.error("FAIL: SMOKE_SYNCREAD must be 1 or unset (got " + SYNCREAD_RAW + ")");
     process.exit(1);
 }
-if (SYNCREAD && (DIRECT || MENU || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE)) {
+if (SYNCREAD && (DIRECT || MENU || INTRO || WRAP !== "" || REMEMBER || (VIEWPORT?.length ?? 0) > 0 || PICK_MODE)) {
     console.error("FAIL: SMOKE_SYNCREAD runs on its own, with no SMOKE_MISSION, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT or SMOKE_PICK");
     process.exit(1);
 }
 // A trace run walks the menu to a city the way the soak does, so it runs on its own too.
-if (TRACE && (MISSION_MODE !== "" || SAVES || INTRO || WRAP !== "" || REMEMBER || VIEWPORT !== null || PICK_MODE || SYNCREAD)) {
+if (TRACE && (MISSION_MODE !== "" || SAVES || INTRO || WRAP !== "" || REMEMBER || (VIEWPORT?.length ?? 0) > 0 || PICK_MODE || SYNCREAD)) {
     console.error("FAIL: SMOKE_TRACE runs on its own, with no SMOKE_MISSION, SMOKE_SAVES, SMOKE_MOVIE, SMOKE_WRAP, SMOKE_REMEMBER, SMOKE_VIEWPORT, SMOKE_PICK or SMOKE_SYNCREAD");
     process.exit(1);
 }
@@ -1538,15 +1543,37 @@ function pngSize(file) {
 }
 
 /**
- * SMOKE_VIEWPORT=WxH: the fit, end to end. The page started the game from its own picker, so
- * `main.js` sized the canvas; the game has to have resized its surface to it, the city has to
- * fill the frame with no black bar left over, and a smaller window has to be filled too.
+ * SMOKE_VIEWPORT=WxH[,W2xH2...]: the fit, end to end. The page started the game from its own
+ * picker, so `main.js` sized the canvas; the game has to have resized its surface to it, the
+ * city has to fill the frame with no black bar left over, and a smaller window has to be filled.
+ * Checks scroll bars and interface scale logging for each viewport size.
  */
 async function runViewportChecks() {
-    const problems = [];
     const ratio = await page.evaluate(() => window.devicePixelRatio || 1);
-    const startPixels = { width: Math.floor(VIEWPORT.width * ratio), height: Math.floor(VIEWPORT.height * ratio) };
-    const startLine = "osiris web: set canvas to " + VIEWPORT.width + "x" + VIEWPORT.height;
+    /** @type {{ vp: string, problems: string[] }[]} */
+    const results = [];
+
+    for (const vp of VIEWPORT) {
+        const startPixels = { width: Math.floor(vp.width * ratio), height: Math.floor(vp.height * ratio) };
+        const startLine = "osiris web: set canvas to " + vp.width + "x" + vp.height;
+
+        /** @type {string[]} */
+        const problems = [];
+
+        // ── Scroll bar check (no scroll bars at the initial viewport size) ──
+        const scrollBars = await page.evaluate(() => ({
+            hScroll: document.documentElement.scrollWidth > window.innerWidth,
+            vScroll: document.documentElement.scrollHeight > window.innerHeight,
+        }));
+        if (scrollBars.hScroll || scrollBars.vScroll) {
+            problems.push("scroll bars visible (h " + scrollBars.hScroll + "/ v " + scrollBars.vScroll + ")");
+        }
+
+        // ── Interface scale logging detection (wasm logs the capped scale) ──
+        const hasScaleLog = consoleMessages.some((m) => m.includes("osiris web: interface scale"));
+        if (!hasScaleLog && (vp.width < 1024 || vp.height < 768)) {
+            problems.push("no 'osiris web: interface scale' log line for " + vp.width + "x" + vp.height);
+        }
 
     if (!consoleMessages.some((m) => m.includes(startLine))) {
         problems.push("the page never printed " + startLine);
@@ -1567,13 +1594,13 @@ async function runViewportChecks() {
             startHidden: document.getElementById("start").hidden,
         };
     });
-    if (fit.inner[0] !== VIEWPORT.width || fit.inner[1] !== VIEWPORT.height) {
+    if (fit.inner[0] !== vp.width || fit.inner[1] !== vp.height) {
         problems.push("the window is " + fit.inner.join("x") + ", not " + VIEWPORT_RAW);
     }
     if (fit.bitmap[0] !== startPixels.width || fit.bitmap[1] !== startPixels.height) {
         problems.push("the canvas bitmap is " + fit.bitmap.join("x") + ", want " + startPixels.width + "x" + startPixels.height);
     }
-    if (fit.rect[0] !== 0 || fit.rect[1] !== 0 || fit.rect[2] !== VIEWPORT.width || fit.rect[3] !== VIEWPORT.height) {
+    if (fit.rect[0] !== 0 || fit.rect[1] !== 0 || fit.rect[2] !== vp.width || fit.rect[3] !== vp.height) {
         problems.push("the canvas does not fill the window (at " + fit.rect.join(",") + ")");
     }
     if (!fit.controls) problems.push("the corner controls are not on screen while the game runs");
@@ -1584,7 +1611,7 @@ async function runViewportChecks() {
     const size = fs.existsSync(shotFile) ? pngSize(shotFile) : null;
     if (!size) {
         problems.push("no readable city screenshot at " + shotFile);
-    } else if (size.width !== VIEWPORT.width || size.height !== VIEWPORT.height) {
+    } else if (size.width !== vp.width || size.height !== vp.height) {
         problems.push("the screenshot is " + size.width + "x" + size.height + ", not " + VIEWPORT_RAW);
     } else {
         console.log("osiris web: the screenshot is " + size.width + "x" + size.height);
@@ -1737,13 +1764,44 @@ async function runViewportChecks() {
         }
     }
 
-    if (problems.length > 0) {
-        for (const problem of problems) console.error("FAIL: " + problem);
-        console.error("osiris web: viewport FAILED (" + VIEWPORT_RAW + ")");
-        process.exitCode = 1;
-        return;
+        results.push({ vp: vp.width + "x" + vp.height, problems });
     }
-    console.log("osiris web: viewport OK (" + VIEWPORT_RAW + " then 1280x720)");
+
+    // Print per-viewport summary and check for small-window issues.
+    const allSmallOK = results.every((r) => {
+        if (r.problems.length > 0) return false;
+        // A viewport is "small" if either dimension is below the desktop minimum.
+        const vpSize = VIEWPORT.find((v) => v.width === Number(r.vp.split("x")[0]) && v.height === Number(r.vp.split("x")[1]));
+        return !vpSize || vpSize.width >= 1024 && vpSize.height >= 768;
+    });
+
+    for (const r of results) {
+        if (r.problems.length > 0) {
+            for (const problem of r.problems) console.error("FAIL [" + r.vp + "]: " + problem);
+            process.exitCode = 1;
+        } else {
+            console.log("osiris web: viewport OK (" + r.vp + " then 1280x720)");
+        }
+    }
+
+    // Small-window summary.
+    const smallVPs = VIEWPORT.filter((v) => v.width < 1024 || v.height < 768);
+    if (smallVPs.length > 0 && allSmallOK) {
+        const scales = smallVPs.map((v) => {
+            // Find the scale from console messages.
+            const match = consoleMessages.find((m) => m.includes("osiris web: interface scale"))?.match(/interface scale ([\d.]+)/);
+            return (match ? "scale " + match[1] : "scale ?");
+        });
+        console.log(
+            "osiris web: small window OK ("
+            + smallVPs.map((v) => v.width + "x" + v.height).join(", ")
+            + ", " + scales.join(", ") + ")"
+        );
+    }
+
+    if (results.some((r) => r.problems.length > 0)) {
+        console.error("osiris web: viewport FAILED (" + VIEWPORT_RAW + ")");
+    }
 }
 
 /**
@@ -1879,15 +1937,15 @@ async function run() {
             : ["--use-angle=gl", "--no-sandbox"];
         // A viewport run also pins the device pixel ratio to 1: the canvas is sized from
         // it, and a retina screen would otherwise double the bitmap under the run.
-        if (VIEWPORT) args.push("--force-device-scale-factor=1");
+        if ((VIEWPORT?.length ?? 0) > 0) args.push("--force-device-scale-factor=1");
         browser = await chromium.launch({ headless: !HEADED, args });
         // A viewport run pins the device pixel ratio to 1: the size the game reports back is
         // the canvas bitmap, and a retina screen would otherwise turn 1920x1080 into
         // 3840x2160 and read the menu's coordinates against the wrong scale. The maths at
         // other ratios is `fit-test.mjs`'s job, not this run's.
-        if (VIEWPORT) {
+        if ((VIEWPORT?.length ?? 0) > 0) {
             const context = await browser.newContext({
-                viewport: { width: VIEWPORT.width, height: VIEWPORT.height },
+                viewport: { width: VIEWPORT[0].width, height: VIEWPORT[0].height },
                 deviceScaleFactor: 1,
             });
             page = await context.newPage();

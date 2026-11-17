@@ -78,6 +78,13 @@ pub fn ui_scale(system: f64, height: f64) -> f64 {
     }
 }
 
+/// Cap the interface scale so the logical screen is never smaller than 1024x768.
+/// On web this prevents the game from laying out on a screen too small for tested
+/// layouts. The bitmap stays at device pixels; only the logical screen shrinks.
+pub fn cap_scale(scale: f64, bitmap_w: f64, bitmap_h: f64) -> f64 {
+    scale.min(bitmap_w / 1024.0).min(bitmap_h / 768.0)
+}
+
 const CLEAR: wgpu::Color = wgpu::Color {
     r: 0.0,
     g: 0.0,
@@ -167,6 +174,9 @@ pub struct Gfx {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     pub renderer: Renderer,
+    /// Last logged logical screen size, for the web-only scale-change log.
+    #[cfg(target_arch = "wasm32")]
+    last_log_screen: Option<[f32; 2]>,
 }
 
 impl Gfx {
@@ -211,6 +221,8 @@ impl Gfx {
             window,
             surface,
             config,
+            #[cfg(target_arch = "wasm32")]
+            last_log_screen: None,
             renderer,
         };
         gfx.fit();
@@ -218,16 +230,33 @@ impl Gfx {
     }
 
     /// Device pixels per interface pixel: the system's scaling times the player's
-    /// interface size.
+    /// interface size. On web this is further capped so the logical screen is never
+    /// smaller than 1024x768, keeping the game playable in narrow browser windows.
     pub fn scale(&self) -> f64 {
-        ui_scale(self.window.scale_factor(), self.config.height as f64)
+        let s = ui_scale(self.window.scale_factor(), self.config.height as f64);
+        #[cfg(target_arch = "wasm32")]
+        let s = cap_scale(s, self.config.width as f64, self.config.height as f64);
+        s
     }
 
     /// Sets the renderer's screen to the surface in interface pixels.
     fn fit(&mut self) {
         let scale = self.scale() as f32;
-        self.renderer.screen = [self.config.width as f32 / scale, self.config.height as f32 / scale];
+        let logical_w = self.config.width as f32 / scale;
+        let logical_h = self.config.height as f32 / scale;
+        self.renderer.screen = [logical_w, logical_h];
         self.renderer.scale = scale;
+
+        #[cfg(target_arch = "wasm32")]
+        if self.last_log_screen != Some([logical_w, logical_h]) {
+            log::info!(
+                "osiris web: interface scale {:.2}, screen {}x{}",
+                scale,
+                logical_w as u32,
+                logical_h as u32
+            );
+            self.last_log_screen = Some([logical_w, logical_h]);
+        }
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -389,5 +418,62 @@ mod tests {
         // Anything else keeps the backend's own name, so a wrong backend is visible.
         assert_eq!(backend_label(wgpu::Backend::Metal), "Metal");
         assert_eq!(backend_label(wgpu::Backend::Vulkan), "Vulkan");
+    }
+
+    #[test]
+    fn cap_scale_crops_when_bitmap_is_smaller_than_1024x768() {
+        // A 1366x630 bitmap at ratio 1: ui_scale(1.0, 630.0) = 1.0.
+        // Capped: min(1.0, 1366/1024, 630/768) = min(1.0, ~1.33, ~0.82) = ~0.82.
+        let capped = cap_scale(1.0, 1366.0, 630.0);
+        // The exact cap is 630/768 = 0.8203125.
+        assert!((capped - 630.0 / 768.0).abs() < 1e-9);
+        // Logical screen: [1366/cap, 630/cap] ≈ [1665.0, 768.0].
+        let logical_w = 1366.0 / capped;
+        let logical_h = 630.0 / capped;
+        assert!(logical_w >= 1024.0 - 0.1);
+        assert!((logical_h - 768.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn cap_scale_does_nothing_when_bitmap_is_large_enough() {
+        // A 1920x1080 bitmap at ratio 1: both ratios > 1, so no capping.
+        let capped = cap_scale(1.0, 1920.0, 1080.0);
+        assert!((capped - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cap_scale_crops_for_wide_but_short_bitmaps() {
+        // A 2560x400 bitmap: width ratio is fine (2560/1024 ≈ 2.5), but height
+        // ratio is too small (400/768 ≈ 0.52). Scale should be capped to ~0.52.
+        let capped = cap_scale(1.0, 2560.0, 400.0);
+        assert!((capped - 400.0 / 768.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cap_scale_crops_for_narrow_but_tall_bitmaps() {
+        // A 500x1200 bitmap: height ratio is fine (1200/768 ≈ 1.56), but width
+        // ratio is too small (500/1024 ≈ 0.49). Scale should be capped to ~0.49.
+        let capped = cap_scale(1.0, 500.0, 1200.0);
+        assert!((capped - 500.0 / 1024.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ui_scale_returns_1_for_normal_height_at_ratio_1() {
+        // At height 630 with system ratio 1, logical = 630/1 = 630.
+        // This is below both 1300 and 1800 thresholds, so auto = 1.0.
+        let s = ui_scale(1.0, 630.0);
+        assert!((s - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mouse_maps_through_capped_scale() {
+        // At bitmap 1366x630 and ratio 1, capped scale = 630/768.
+        // A physical point (683, 315) maps to logical:
+        let cap = 630.0 / 768.0;
+        let lx = 683.0 / cap;
+        let ly = 315.0 / cap;
+        // Expected: (832.6, 384.0), within 0.1.
+        assert!((lx - 832.6_f64).abs() < 0.1);
+        assert!((ly - 384.0_f64).abs() < 0.1);
     }
 }

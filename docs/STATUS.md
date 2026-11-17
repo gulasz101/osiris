@@ -191,10 +191,12 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   `OSIRIS_DATA=<folder> SMOKE_MOVIE=intro scripts/web-smoke.sh` prints
   `osiris web: the intro played, Escape skipped it, the menu is up (3 buttons)`.
 - **The canvas fills the window.** The picture is the browser window's size at the screen's
-  pixel ratio, and it follows the window, fullscreen and F11 (`web-fit`). Below 1024x768 the page
-  keeps that floor, and a corner link brings the page back over the running game.
-  `OSIRIS_DATA=<folder> SMOKE_MISSION=menu SMOKE_VIEWPORT=1920x1080 scripts/web-smoke.sh` prints
-  `osiris web: viewport OK (1920x1080 then 1280x720)`.
+  pixel ratio, and it follows the window, fullscreen and F11 (`web-fit`). Below 1024×768 in either
+  direction the Rust side shrinks the interface so the game still lays out on a logical screen of
+  at least 1024×768 — no scroll bar, just a smaller picture. Text below scale 1 is a little soft
+  (it is resampled pixel art). A comma-separated viewport run like
+  `SMOKE_VIEWPORT=1366x630,800x600,1920x1080 SMOKE_MISSION=menu scripts/web-smoke.sh` prints
+  `osiris web: small window OK (1366x630, 800x600)` and `viewport OK` for each size.
 - **The page is published.** `scripts/pages-site.sh` builds a static site in `out/site/` holding
   only the page and the wasm, and GitHub Pages serves it (`web-pages`). `sh scripts/pages-site.sh`
   prints `check-site: OK`, and `SMOKE_ROOT=$PWD/out/site SMOKE_BASE=/osiris/ node web/tests/smoke.mjs`

@@ -1,0 +1,9 @@
+---
+# .openspec.yaml — web-scale change
+schema: spec-driven
+created: 2026-11-17
+goal: Cap the interface scale so small browser windows shrink the picture instead of scrolling, keeping a logical screen of at least 1024x768.
+affected_areas:
+  - renderer
+  - web-fit
+skip_specs: true

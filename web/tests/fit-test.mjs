@@ -45,12 +45,13 @@ check("fractional window at ratio 1.5", fitSize(1366.7, 768.9, 1.5), {
     pixelHeight: 1152,
 });
 
-// Below the minimum in both directions the game keeps its minimum and the page scrolls.
+// Below the minimum in both directions the canvas is still the window size; the Rust side
+// shrinks the picture so the game lays out on at least 1024x768 logical pixels.
 check("800x600", fitSize(800, 600, 1), {
-    width: MIN_WIDTH,
-    height: MIN_HEIGHT,
-    pixelWidth: MIN_WIDTH,
-    pixelHeight: MIN_HEIGHT,
+    width: 800,
+    height: 600,
+    pixelWidth: 800,
+    pixelHeight: 600,
 });
 
 // Exactly the minimum is not below it.
@@ -82,10 +83,10 @@ for (const ratio of [0, Number.NaN, undefined]) {
 
 // A window with no size at all must still give a canvas the game can draw into.
 check("0x0", fitSize(0, 0, 1), {
-    width: MIN_WIDTH,
-    height: MIN_HEIGHT,
-    pixelWidth: MIN_WIDTH,
-    pixelHeight: MIN_HEIGHT,
+    width: 1,
+    height: 1,
+    pixelWidth: 1,
+    pixelHeight: 1,
 });
 
 if (failures > 0) {

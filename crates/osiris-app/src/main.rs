@@ -1419,6 +1419,8 @@ impl ApplicationHandler for App {
             };
 
             wasm_bindgen_futures::spawn_local(async move {
+                // The loading screen shows this step before the art is unpacked for the GPU.
+                crate::web::stage_painted("graphics").await;
                 let images = match sidebar::SidebarImages::load(&library).map_err(anyhow::Error::msg) {
                     Ok(v) => v,
                     Err(e) => {
@@ -1468,6 +1470,9 @@ impl ApplicationHandler for App {
                         Err(e) => {
                             log::error!("{e:#}");
                             self.status = Some((format!("Graphics failed: {e}"), 10.0));
+                            // Without graphics the game cannot draw that status, so the
+                            // page's loading screen says it instead.
+                            crate::web::notify_failed(&format!("The game could not start its graphics: {e}"));
                         }
                     }
                 }
@@ -1761,6 +1766,8 @@ impl ApplicationHandler for App {
 impl App {
     /// What happens after graphics are ready: start the right screen.
     fn finish_start(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(target_arch = "wasm32")]
+        let _ = crate::web::stage("menu");
         let direct = if let Some(map) = &self.args.map {
             Some((Source::Map(map.clone()), None))
         } else {
@@ -2262,7 +2269,18 @@ fn main() -> Result<()> {
 }
 
 /// Run the game with the given arguments.
-pub(crate) fn run(mut args: Args) -> Result<()> {
+pub(crate) fn run(args: Args) -> Result<()> {
+    let Some((args, data)) = run_args(args)? else {
+        return Ok(());
+    };
+    let library = open_library(&data)?;
+    let assets = load_assets(&data, &library)?;
+    run_loaded(args, data, library, assets)
+}
+
+/// The first step of [`run`]: the language, and the game folder to read. `None` when the
+/// player closed the folder picker without choosing one, which ends the run quietly.
+pub(crate) fn run_args(mut args: Args) -> Result<Option<(Args, PathBuf)>> {
     // Screenshots stay in the data's own language unless --lang asks, so they don't
     // depend on the player's choice.
     match args.lang {
@@ -2279,15 +2297,25 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             None if args.screenshot.is_some() => PathBuf::from("PharaohData"),
             None => match data_dir::pick(&user_dir()) {
                 Some(d) => d,
-                None => return Ok(()),
+                None => return Ok(None),
             },
         },
     };
     let args = Args { data: Some(data.clone()), ..args };
-    let library = ImageLibrary::open(&data.join("Data")).with_context(|| {
+    Ok(Some((args, data)))
+}
+
+/// The game's art library in `data/Data`, with the message a player can act on when the
+/// folder is not a Pharaoh install.
+pub(crate) fn open_library(data: &Path) -> Result<ImageLibrary> {
+    ImageLibrary::open(&data.join("Data")).with_context(|| {
         trf("Could not read the Pharaoh game data at {0}. Choose the folder Pharaoh is installed in (the GOG or Steam Pharaoh + Cleopatra), or pass --data <dir>.", &[&data.display()]).to_string()
-    })?;
-    let assets = load_assets(&data, &library)?;
+    })
+}
+
+/// The rest of [`run`], once the art and the rules are read: a screenshot, or the window
+/// and its event loop.
+pub(crate) fn run_loaded(args: Args, data: PathBuf, library: ImageLibrary, assets: Assets) -> Result<()> {
     migrate_legacy_family();
 
     if let Some(out) = &args.screenshot {

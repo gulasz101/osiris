@@ -70,6 +70,9 @@ node web/tests/opfs-test.mjs
 echo "== saves test"
 node web/tests/saves-test.mjs
 
+echo "== boot test"
+node web/tests/boot-test.mjs
+
 echo "== cargo test"
 cargo test --workspace --quiet
 

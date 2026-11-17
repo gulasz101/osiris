@@ -22,6 +22,7 @@ import { fitSize } from "./fit.js";
 import { count as countGameFiles, register as registerGameFile, totalSize as totalGameBytes } from "./files.js";
 import { forget as forgetGameFiles, restore as restoreGameFiles, save as saveGameFiles } from "./opfs.js";
 import { createBar } from "./progress.js";
+import { STEPS, downloadText, elapsedText, fetchWasm, stepAt } from "./boot.js";
 import { download, formatDate, formatSize, saveName, tooBig } from "./saves.js";
 
 let busy = false;
@@ -91,8 +92,30 @@ globalThis.start_game = start_game;
 // The number `?mission=` gave, so the smoke test can check the URL reached the game.
 globalThis.osirisMission = mission;
 
+// The boot line on the title screen: what the page does before its menu can be used.
+const boot = document.getElementById("boot");
+const bootText = document.getElementById("boot-text");
+const bootFill = document.getElementById("boot-fill");
+
+/** Say on the title screen what the page is doing; `fraction` is 0..1, or null for no end. */
+function bootSay(text, fraction) {
+    if (bootText) bootText.textContent = text;
+    if (bootFill) {
+        bootFill.style.transform = "scaleX(" + (fraction === null ? 0 : Math.min(1, fraction)) + ")";
+        bootFill.parentElement.classList.toggle("done", fraction !== null && fraction >= 1);
+    }
+}
+
 try {
-    await init();
+    // The engine is a 13 MB download on a first visit; count it as it comes in.
+    bootSay("Downloading the engine...", 0);
+    const wasmUrl = new URL("./pkg/osiris_bg.wasm", import.meta.url);
+    await init({
+        module_or_path: fetchWasm(wasmUrl, (done, total) => {
+            bootSay(downloadText(done, total), total > 0 ? done / total : null);
+        }),
+    });
+    bootSay("Starting the engine...", 1);
     // A visit that restores the game files from browser storage never picks a folder, so
     // the page loading is its start. A pick sets the clock again in `loadFolder`.
     set_pick_time(performance.now());
@@ -169,30 +192,117 @@ const FLAVOUR = [
 ];
 let flavourTimer = 0;
 let slowTimer = 0;
+const loadingFill = document.getElementById("loading-fill");
+const loadingSteps = document.getElementById("loading-steps");
+const loadingReload = document.getElementById("loading-reload");
+// When Enter was pressed, and when the step on screen began.
+let enteredAt = 0;
+let stepStartedAt = 0;
+let stepIndex = -1;
 
-/** Put the loading screen up, with a line that changes every few seconds. */
+/**
+ * Move the loading bar to `percent` over `ms`. The fill is moved with a CSS transition on
+ * `transform`, which the browser runs off the main thread, so it keeps moving while the
+ * game's start holds the page.
+ */
+function moveBar(percent, ms) {
+    if (!loadingFill) return;
+    loadingFill.style.transition = "transform " + Math.round(ms) + "ms cubic-bezier(0.15, 0.6, 0.35, 1)";
+    loadingFill.style.transform = "scaleX(" + Math.max(0, Math.min(100, percent)) / 100 + ")";
+}
+
+/** The step list's row for `index`. */
+function stepRow(index) {
+    return loadingSteps ? loadingSteps.children[index] : null;
+}
+
+/** Mark the step on screen done, with how long it took. */
+function closeStep(at) {
+    const row = stepRow(stepIndex);
+    if (!row) return;
+    row.classList.remove("now");
+    row.classList.add("done");
+    const took = row.querySelector(".took");
+    if (took) took.textContent = ((at - stepStartedAt) / 1000).toFixed(1) + " s";
+}
+
+/**
+ * The game is on step `name` (`web::stage`): tick the step before it, light this one, and
+ * send the bar towards the step's end. Returns a promise that settles once the browser has
+ * painted that, which the game waits for before it does the step's work.
+ */
+function enterStep(name) {
+    const step = stepAt(name);
+    if (!step || !loading || loading.hidden) return Promise.resolve();
+    const at = performance.now();
+    // Steps the game went through without naming them are done too.
+    while (stepIndex < step.index) {
+        if (stepIndex >= 0) closeStep(at);
+        stepIndex += 1;
+        stepStartedAt = at;
+    }
+    const row = stepRow(step.index);
+    if (row) row.classList.add("now");
+    if (loadingText) loadingText.textContent = STEPS[step.index].label + "...";
+    // Most of the way to the step's end over about the time the step takes, then slower,
+    // so the bar never sits still and never runs ahead of the game.
+    moveBar(step.from + (step.to - step.from) * 0.9, step.expect * 1.6);
+    return new Promise((resolve) => {
+        // Two frames: the first runs before the paint, the timeout after it. A hidden tab
+        // never paints, so the timeout on its own lets the start go on there too.
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+        setTimeout(resolve, 150);
+    });
+}
+
+globalThis.osirisStage = enterStep;
+
+/** Put the loading screen up: the steps, the bar at 0 and a line that changes. */
 function showLoading() {
     if (!loading) return;
-    loading.classList.remove("fade");
+    loading.classList.remove("fade", "failed");
     loading.hidden = false;
+    if (loadingReload) loadingReload.hidden = true;
+    if (loadingFill) loadingFill.parentElement.classList.remove("done");
     if (loadingText) loadingText.textContent = "Starting the game...";
+    if (loadingSteps) {
+        loadingSteps.textContent = "";
+        for (const step of STEPS) {
+            const li = document.createElement("li");
+            li.dataset.step = step.name;
+            const label = document.createElement("span");
+            label.textContent = step.label;
+            const took = document.createElement("span");
+            took.className = "took";
+            li.append(label, took);
+            loadingSteps.appendChild(li);
+        }
+    }
+    enteredAt = performance.now();
+    stepIndex = -1;
+    moveBar(0, 0);
     let i = Math.floor(Math.random() * FLAVOUR.length);
     if (loadingFlavour) loadingFlavour.textContent = FLAVOUR[i];
     flavourTimer = setInterval(() => {
         i = (i + 1) % FLAVOUR.length;
         if (loadingFlavour) loadingFlavour.textContent = FLAVOUR[i];
     }, 2600);
-    // The first start after a pick reads the files the menu needs from disk; say so when
-    // it takes a while, so the page never looks stuck.
+    // A first start after a pick reads the files the menu needs from disk, and a slow disk
+    // or graphics card can make it long; say so, so the page never looks stuck.
     slowTimer = setTimeout(() => {
-        if (loadingText) loadingText.textContent = "Still starting. The first start can take a minute.";
+        if (loadingFlavour) loadingFlavour.textContent = "This start is a slow one. The first start after a pick can take a minute.";
+        clearInterval(flavourTimer);
     }, 20_000);
+}
+
+function stopLoadingTimers() {
+    clearInterval(flavourTimer);
+    clearTimeout(slowTimer);
 }
 
 /** Fade the loading screen out once the game has drawn its first screen. */
 function hideLoading() {
-    clearInterval(flavourTimer);
-    clearTimeout(slowTimer);
+    stopLoadingTimers();
     if (!loading || loading.hidden) return;
     loading.classList.add("fade");
     setTimeout(() => {
@@ -202,21 +312,48 @@ function hideLoading() {
 }
 
 // The game calls this (`web::notify_ready`) when it has its first screen: the intro, the
-// main menu, or the mission `?mission=` asked for.
+// main menu, or the mission `?mission=` asked for. The bar fills and every step is ticked
+// before the screen fades, so the player sees the start finish.
 globalThis.osirisReady = () => {
     console.log("osiris web: the game is ready, taking the loading screen down");
     phase = "running";
     if (controls) controls.hidden = false;
-    hideLoading();
+    if (loading && !loading.hidden) {
+        enterStep(STEPS[STEPS.length - 1].name);
+        closeStep(performance.now());
+        if (loadingText) loadingText.textContent = "Ready in " + elapsedText(performance.now() - enteredAt) + ".";
+        if (loadingFill) loadingFill.parentElement.classList.add("done");
+        moveBar(100, 250);
+        stopLoadingTimers();
+        console.log("osiris web: the start took " + elapsedText(performance.now() - enteredAt));
+        setTimeout(hideLoading, 450);
+    } else {
+        hideLoading();
+    }
     showMenu();
 };
+
+// The game calls this (`web::notify_failed`) when its start fails after `start_game` has
+// returned, which is the graphics. The game cannot start twice in one page, so the way on
+// is a reload.
+globalThis.osirisFailed = (message) => {
+    console.error("osiris web: " + message);
+    stopLoadingTimers();
+    if (!loading) return;
+    loading.classList.add("failed");
+    if (loadingText) loadingText.textContent = message;
+    if (loadingFlavour) loadingFlavour.textContent = "A browser with WebGPU or WebGL 2 turned on is needed.";
+    if (loadingReload) loadingReload.hidden = false;
+};
+
+if (loadingReload) loadingReload.addEventListener("click", () => location.reload());
 
 /**
  * Show the canvas and start the game. The game files must be mounted already, either by
  * `loadFolder` from the player's folder or from the copy in browser storage. The loading
  * screen covers the canvas until the game says it is ready.
  */
-function start() {
+async function start() {
     if (phase === "running" || phase === "starting") {
         // Over a running game, Enter is the way back to it.
         if (startDiv.classList.contains("over-game")) togglePage();
@@ -233,7 +370,9 @@ function start() {
     fitCanvas();
     status.textContent = "";
     showMenu();
-    start_game(mission);
+    // The start is a promise: the game paints each step on the loading screen between its
+    // slow parts (`web::stage_painted`), and a refusal rejects it.
+    await start_game(mission);
 }
 
 if (enterButton) {
@@ -242,11 +381,7 @@ if (enterButton) {
             startStored();
             return;
         }
-        try {
-            start();
-        } catch (err) {
-            fail(err);
-        }
+        start().catch(fail);
     });
 }
 
@@ -493,10 +628,14 @@ function showForget() {
 // player never sees the picker twice for the same install.
 let storedFiles = 0;
 if (!missionInvalid) {
+    bootSay("Looking for game files kept in this browser...", null);
+    let seen = 0;
     try {
         storedFiles = await restoreGameFiles((path, file) => {
             registerGameFile("/" + path, file);
             mount_lazy(path, file.size);
+            seen += 1;
+            if (seen % 100 === 0) bootSay("Opening the game files kept in this browser: " + seen, null);
         });
     } catch (err) {
         console.warn("osiris web: reading the game files from browser storage failed", err);
@@ -509,6 +648,8 @@ if (storedFiles > 0) {
     sayFound(storedFiles, totalGameBytes(), "kept in this browser");
     showForget();
 }
+// The page is ready: the boot line gives way to the menu.
+if (boot) boot.hidden = true;
 showMenu();
 if (phase === "ready" && enterButton) enterButton.focus();
 
@@ -516,7 +657,7 @@ if (phase === "ready" && enterButton) enterButton.focus();
 // copy forgets it and asks for the folder again.
 async function startStored() {
     try {
-        start();
+        await start();
     } catch (err) {
         console.warn("osiris web: the stored game files cannot start the game, forgetting them", err);
         await forgetGameFiles();

@@ -43,6 +43,58 @@ pub fn notify_ready() {
     }
 }
 
+/// Tell the page which step of the start the game is on (`files`, `rules`, `graphics`,
+/// `menu`), so its loading screen can show it. The page's `globalThis.osirisStage` hook
+/// draws the step and may return a promise that settles once the browser has painted it;
+/// the value is handed back so [`stage_painted`] can wait for it. Each step is logged with
+/// the time since the pick, which is how the smoke test and a player's console see where
+/// the start spends its time.
+pub fn stage(name: &str) -> JsValue {
+    match since_pick_ms() {
+        Some(ms) => log::info!("osiris web: stage {name} at {} ms", ms.round() as i64),
+        None => log::info!("osiris web: stage {name}"),
+    }
+    let Ok(hook) = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("osirisStage")) else {
+        return JsValue::UNDEFINED;
+    };
+    let Some(hook) = hook.dyn_ref::<js_sys::Function>() else {
+        return JsValue::UNDEFINED;
+    };
+    match hook.call1(&JsValue::NULL, &JsValue::from_str(name)) {
+        Ok(value) => value,
+        Err(err) => {
+            log::warn!("osiris web: the page's stage hook failed: {err:?}");
+            JsValue::UNDEFINED
+        }
+    }
+}
+
+/// Tell the page the start failed after `start_game` had returned (the graphics, which
+/// start on their own), through `globalThis.osirisFailed`, so the loading screen does not
+/// wait for a first screen that never comes.
+pub fn notify_failed(message: &str) {
+    let Ok(hook) = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("osirisFailed")) else {
+        return;
+    };
+    if let Some(hook) = hook.dyn_ref::<js_sys::Function>()
+        && let Err(err) = hook.call1(&JsValue::NULL, &JsValue::from_str(message))
+    {
+        log::warn!("osiris web: the page's failure hook failed: {err:?}");
+    }
+}
+
+/// [`stage`], then wait until the page has painted it. The start's heavy steps run on the
+/// page's main thread, so without this wait the browser would not draw the new step until
+/// the whole start was over.
+pub async fn stage_painted(name: &str) {
+    let value = stage(name);
+    if let Ok(promise) = value.dyn_into::<js_sys::Promise>()
+        && let Err(err) = wasm_bindgen_futures::JsFuture::from(promise).await
+    {
+        log::warn!("osiris web: waiting for the page to paint step {name} failed: {err:?}");
+    }
+}
+
 // ── Debug audio for the smoke test ──────────────────────────────────
 
 thread_local! {
@@ -458,8 +510,13 @@ fn canvas_size() -> (u32, u32) {
 ///
 /// `mission` is the mission to start, as the desktop's `--mission N`; `undefined`
 /// (or `null`) starts at the main menu.
+///
+/// The start is async so the page can show each step: the game files are opened, the
+/// rules and texts read, and between the steps the browser gets to paint the loading
+/// screen ([`stage_painted`]). The returned promise rejects with the same message the
+/// error used to throw.
 #[wasm_bindgen]
-pub fn start_game(mission: Option<u32>) -> Result<(), JsValue> {
+pub async fn start_game(mission: Option<u32>) -> Result<(), JsValue> {
     if !osiris_vfs::is_dir("/PharaohData/Data") {
         return Err(
             "This folder does not hold Pharaoh's Data folder. Choose the folder that contains \
@@ -487,7 +544,18 @@ pub fn start_game(mission: Option<u32>) -> Result<(), JsValue> {
     };
 
     log::info!("osiris web: start_game - args prepared, about to call crate::run()");
-    let result = crate::run(args);
+    // The same steps as `crate::run`, with a painted step between the slow ones.
+    let result: anyhow::Result<()> = async {
+        let Some((args, data)) = crate::run_args(args)? else {
+            return Ok(());
+        };
+        stage_painted("files").await;
+        let library = crate::open_library(&data)?;
+        stage_painted("rules").await;
+        let assets = crate::load_assets(&data, &library)?;
+        crate::run_loaded(args, data, library, assets)
+    }
+    .await;
     match &result {
         Ok(_) => log::info!("osiris web: run() returned Ok"),
         Err(e) => log::warn!("osiris web: run() returned error: {e:#}"),

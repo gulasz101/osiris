@@ -354,6 +354,18 @@ function checkMenuTime() {
         return false;
     }
     console.log("osiris web: menu time OK (" + ms + " ms from the pick to the main menu)");
+    // The loading screen's steps (web-loading): the game names each one, in order.
+    const steps = [];
+    for (const m of consoleMessages) {
+        const hit = /osiris web: stage (\w+) at (\d+) ms/.exec(m);
+        if (hit) steps.push(hit[1] + " " + hit[2] + " ms");
+    }
+    const names = steps.map((s) => s.split(" ")[0]).join(",");
+    if (!names.endsWith("files,rules,graphics,menu")) {
+        console.error("FAIL: the start did not name its steps in order (got '" + names + "')");
+        return false;
+    }
+    console.log("osiris web: loading steps OK (" + steps.slice(-4).join(", ") + ")");
     return true;
 }
 
@@ -2403,9 +2415,13 @@ async function run() {
                 // The page is still reading those files (775 MB on this machine), so the
                 // staging folder has to stay on disk until it has read them all and
                 // started the game. Deleting it here made every later read fail, and the
-                // page then sat on an empty status line with nothing to show.
+                // page then sat on an empty status line with nothing to show. The game
+                // reads its files after the loading screen has painted each step, so the
+                // canvas being sized is too early: wait for its first screen.
                 const readAll = await until(
-                    () => panicLine() !== null || consoleMessages.some((m) => m.includes("osiris web: set canvas to")),
+                    () =>
+                        panicLine() !== null ||
+                        consoleMessages.some((m) => m.includes("osiris web: the game is ready") || m.includes("osiris web: run() returned error")),
                     300_000,
                     500
                 );

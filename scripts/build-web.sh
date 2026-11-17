@@ -20,4 +20,8 @@ else
   echo "osiris web: no wasm-opt on PATH, keeping the release build as wasm-bindgen left it"
 fi
 
+# The page's boot bar needs the wasm's real size: a server that sends it gzipped (GitHub
+# Pages does) puts only the compressed size in Content-Length (web/boot.js, wasmSize).
+printf '{ "bytes": %s }\n' "$(wc -c < web/pkg/osiris_bg.wasm | tr -d ' ')" > web/pkg/osiris_size.json
+
 ls -l web/pkg

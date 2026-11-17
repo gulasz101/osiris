@@ -18,7 +18,8 @@ if [ ! -d "$dir" ]; then
   exit 1
 fi
 
-# The only files the site may hold: the page, a script next to it, the wasm build
+# The only files the site may hold: the page, a script next to it, the wasm build (and
+# its size, for the boot bar)
 # and an empty .nojekyll so GitHub Pages serves the files verbatim. Any *.js in
 # the top folder is a page script, because pages-site.sh copies web/*.js.
 allowed="
@@ -26,6 +27,7 @@ allowed="
 index.html
 pkg/osiris.js
 pkg/osiris_bg.wasm
+pkg/osiris_size.json
 "
 
 # Same idea as scripts/no-game-files.sh, plus the staging folders.

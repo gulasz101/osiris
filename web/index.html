@@ -142,18 +142,59 @@
         }
         #loading-text { font-size: 1.05rem; color: var(--papyrus); text-shadow: 0 1px 4px #000; min-height: 1.4em; }
         #loading-flavour { font-style: italic; font-size: 0.9rem; color: rgba(241, 227, 192, 0.7); min-height: 1.3em; }
-        .ticker {
-            width: min(26rem, 70vw); height: 3px; overflow: hidden; border-radius: 2px;
-            background: rgba(232, 196, 106, 0.2);
+        /* A real progress bar. The fill moves with `transform: scaleX`, which the browser
+           animates off the main thread, so it keeps gliding while the game's start holds
+           the page's thread. The shimmer on top is a transform too. */
+        .bar {
+            position: relative; width: min(22rem, 70vw); height: 4px; overflow: hidden; border-radius: 2px;
+            background: rgba(232, 196, 106, 0.18); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
         }
-        .ticker::before {
-            content: ""; display: block; width: 35%; height: 100%;
-            background: linear-gradient(90deg, transparent, var(--gold-bright), transparent);
-            animation: slide 1.6s ease-in-out infinite;
+        .bar.wide { width: min(30rem, 78vw); height: 6px; }
+        .bar .fill {
+            position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0);
+            background: linear-gradient(90deg, var(--gold-deep), var(--gold) 60%, var(--gold-bright));
+            box-shadow: 0 0 12px rgba(255, 210, 120, 0.6);
         }
+        .bar::after {
+            content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 30%;
+            background: linear-gradient(90deg, transparent, rgba(255, 243, 201, 0.55), transparent);
+            animation: slide 1.8s ease-in-out infinite;
+        }
+        .bar.done::after { display: none; }
+        #loading-steps {
+            list-style: none; display: flex; flex-direction: column; gap: 0.45rem; text-align: left;
+            width: min(30rem, 78vw); padding: 0.9rem 1.1rem;
+            background: rgba(8, 10, 22, 0.55); border: 1px solid rgba(232, 196, 106, 0.25); border-radius: 3px;
+        }
+        #loading-steps li {
+            display: flex; align-items: center; gap: 0.7em; font-size: 0.92rem;
+            color: rgba(241, 227, 192, 0.45); transition: color 0.3s;
+        }
+        #loading-steps li::before {
+            content: ""; flex: none; width: 0.85em; height: 0.85em; border-radius: 50%;
+            border: 1px solid rgba(232, 196, 106, 0.4);
+        }
+        #loading-steps li.now { color: var(--papyrus); }
+        #loading-steps li.now::before {
+            border-color: var(--gold-bright); border-right-color: transparent;
+            animation: spin 0.9s linear infinite;
+        }
+        #loading-steps li.done { color: rgba(232, 196, 106, 0.85); }
+        #loading-steps li.done::before {
+            content: "✓"; display: grid; place-items: center; border: none; width: 1.1em; height: 1.1em;
+            font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--ink); background: var(--gold);
+        }
+        #loading-steps li .took { margin-left: auto; font-size: 0.78rem; color: rgba(241, 227, 192, 0.5); font-variant-numeric: tabular-nums; }
+        #loading.failed .sun, #loading.failed .bar::after { animation: none; }
+        #loading.failed #loading-text { color: #ffb38a; }
+        #loading .btn[hidden] { display: none; }
+        /* The boot line on the title screen, until the menu can be used. */
+        #boot { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem; }
+        #boot[hidden] { display: none; }
+        #boot-text { font-size: 0.95rem; color: var(--papyrus); text-shadow: 0 1px 3px #000; font-variant-numeric: tabular-nums; }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes glow { 50% { box-shadow: 0 0 70px rgba(255, 210, 120, 0.85); } }
-        @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+        @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 
         /* ── The game's own controls, small and out of the way, over the canvas ── */
         #controls {
@@ -253,9 +294,15 @@
             <div class="rule"></div>
             <p class="tagline">Raise the cities of the Nile, right here in your browser.</p>
             <p id="found"></p>
+            <!-- While the engine downloads and the kept game files are looked up, the menu
+                 waits; this line and bar say what the page is doing. -->
+            <div id="boot" role="status" aria-live="polite">
+                <p id="boot-text">Opening the page...</p>
+                <div class="bar" aria-hidden="true"><div id="boot-fill" class="fill"></div></div>
+            </div>
             <nav id="menu">
                 <button id="enter" type="button" class="btn primary" hidden>Enter the game</button>
-                <label id="choose" class="btn primary" for="folder">Choose your Pharaoh folder</label>
+                <label id="choose" class="btn primary" for="folder" hidden>Choose your Pharaoh folder</label>
                 <input type="file" id="folder" class="visually-hidden" webkitdirectory multiple />
                 <button id="open-saves" type="button" class="btn" hidden>Saved games</button>
                 <div class="row">
@@ -270,9 +317,11 @@
     <div id="loading" hidden>
         <div class="sun" aria-hidden="true"></div>
         <h2>Entering the kingdom</h2>
-        <p id="loading-text">Starting the game...</p>
-        <div class="ticker" aria-hidden="true"></div>
+        <p id="loading-text" role="status" aria-live="polite">Starting the game...</p>
+        <div class="bar wide" aria-hidden="true"><div id="loading-fill" class="fill"></div></div>
+        <ol id="loading-steps"></ol>
         <p id="loading-flavour"></p>
+        <button id="loading-reload" type="button" class="btn" hidden>Reload the page</button>
     </div>
     <div id="progress" hidden>
         <div id="progress-track"><div id="progress-fill"></div></div>

@@ -11,6 +11,6 @@ rm -rf out/site && mkdir -p out/site/pkg out/site/assets
 cp web/index.html out/site/
 cp web/*.js out/site/
 cp web/assets/*.jpg out/site/assets/
-cp web/pkg/osiris.js web/pkg/osiris_bg.wasm out/site/pkg/
+cp web/pkg/osiris.js web/pkg/osiris_bg.wasm web/pkg/osiris_size.json out/site/pkg/
 : > out/site/.nojekyll
 sh scripts/check-site.sh out/site

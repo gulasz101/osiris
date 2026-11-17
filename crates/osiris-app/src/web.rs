@@ -169,8 +169,11 @@ pub fn debug_read_user(name: String) -> Option<String> {
 /// Fails with a readable message if `/PharaohData/Data` does not exist (the wrong
 /// folder was picked). Otherwise calls the same `run` function as the desktop build,
 /// passing `--data /PharaohData`.
+///
+/// `mission` is the mission to start, as the desktop's `--mission N`; `undefined`
+/// (or `null`) starts at the main menu.
 #[wasm_bindgen]
-pub fn start_game() -> Result<(), JsValue> {
+pub fn start_game(mission: Option<u32>) -> Result<(), JsValue> {
     if !osiris_vfs::is_dir("/PharaohData/Data") {
         return Err(
             "This folder does not hold Pharaoh's Data folder. Choose the folder that contains \
@@ -184,7 +187,7 @@ pub fn start_game() -> Result<(), JsValue> {
     let args = crate::Args {
         data: Some(PathBuf::from("/PharaohData")),
         map: None,
-        mission: None,
+        mission: mission.map(|m| m as usize),
         screenshot: None,
         script: None,
         size: (1280, 768),

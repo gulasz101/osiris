@@ -15,6 +15,20 @@ const startDiv = document.getElementById("start");
 const canvas = document.getElementById("osiris");
 const status = document.getElementById("status");
 
+// `?mission=N` starts that mission straight away, as `osiris --mission N` does on the
+// desktop. A value that is not a whole number is refused before the game starts.
+const missionParam = new URLSearchParams(location.search).get("mission");
+let mission = undefined;
+if (missionParam !== null) {
+    const n = Number(missionParam);
+    if (Number.isInteger(n) && n >= 0) {
+        mission = n;
+    } else {
+        console.error("osiris web: mission must be a number, got '" + missionParam + "'");
+    }
+}
+const missionInvalid = missionParam !== null && mission === undefined;
+
 // Expose wasm functions on window so the smoke test can call them via page.evaluate().
 globalThis.debug_write_user = debug_write_user;
 globalThis.debug_read_user = debug_read_user;
@@ -42,6 +56,11 @@ try {
 }
 
 async function loadFolder(list) {
+    if (missionInvalid) {
+        status.textContent = "mission must be a number";
+        return;
+    }
+
     console.log("osiris web: loading " + list.length + " files");
 
     for (let i = 0; i < list.length; i++) {
@@ -63,7 +82,7 @@ async function loadFolder(list) {
         canvas.style.height = "768px";
         console.log("osiris web: set canvas to " + canvas.width + "x" + canvas.height);
         status.textContent = "Starting game...";
-        start_game();
+        start_game(mission);
     } catch (err) {
         console.error(err);
         startDiv.style.display = "flex";

@@ -5,8 +5,6 @@
 // helpers take a FileSystemDirectoryHandle, so web/tests/opfs-test.mjs can drive them
 // with an in-memory folder in Node.
 
-import { readAll } from "./progress.js";
-
 /** The folder under the OPFS root that holds the game files. */
 const GAME_DIR = "game";
 
@@ -72,34 +70,30 @@ export async function writeTree(dir, list, options = {}) {
 }
 
 /**
- * Read every file under `dir` and hand it to `onFile`, through the same `readAll` the
- * folder picker uses, so the restore shows the same bar and reads a few files at once.
- * The marker file is left out.
+ * Hand every file under `dir` to `onFile` as the browser's own `File`, so the page can
+ * register it and tell the file store its path and size without reading a byte
+ * (`web-lazy`). The tree is walked as it always was; only the bytes stay put. The marker
+ * file is left out.
  *
  * @param {FileSystemDirectoryHandle} dir - the `game/` folder.
- * @param {(path: string, bytes: Uint8Array) => void} onFile
- * @param {ReturnType<typeof import("./progress.js").createBar>|null} [bar] - the progress bar.
- * @returns {Promise<number>} how many files were read.
+ * @param {(path: string, file: File) => void} onFile
+ * @returns {Promise<number>} how many files were handed over.
  */
-export async function readTree(dir, onFile, bar = null) {
-    const files = [];
+export async function readTree(dir, onFile) {
+    let count = 0;
     const walk = async (folder, prefix) => {
         for await (const [name, handle] of folder.entries()) {
             const path = prefix + name;
             if (handle.kind === "directory") {
                 await walk(handle, path + "/");
             } else if (path !== MARKER) {
-                files.push({ path, handle });
+                onFile(path, await handle.getFile());
+                count += 1;
             }
         }
     };
     await walk(dir, "");
-    return await readAll(
-        files,
-        (entry) => entry.handle.getFile().then((file) => file.arrayBuffer()),
-        (entry, bytes) => onFile(entry.path, new Uint8Array(bytes)),
-        bar
-    );
+    return count;
 }
 
 /**
@@ -155,9 +149,12 @@ export function available() {
  * it did before this existed: the player picks the folder on every load.
  *
  * @param {Array<{path: string, file: Blob}>} list - the files under the game root.
+ * @param {ReturnType<typeof import("./progress.js").createBar>|null} [bar] - the progress bar.
+ *   This copy is the last place the page reads the whole install, so it is what the bar
+ *   counts now that a pick reads nothing (`web-lazy`).
  * @returns {Promise<number>} how many files were stored, 0 when nothing was.
  */
-export async function save(list) {
+export async function save(list, bar = null) {
     if (!available()) {
         console.warn(NO_STORAGE + ": this browser has no origin private file system");
         return 0;
@@ -168,9 +165,8 @@ export async function save(list) {
         await navigator.storage.persist().catch(() => false);
 
         // Say no before writing anything when the space clearly is not there.
-        const needed = list
-            .filter(entry => !skipFile(entry.path))
-            .reduce((sum, entry) => sum + (entry.file.size || 0), 0);
+        const kept = list.filter(entry => !skipFile(entry.path));
+        const needed = kept.reduce((sum, entry) => sum + (entry.file.size || 0), 0);
         if (typeof navigator.storage.estimate === "function") {
             const estimate = await navigator.storage.estimate();
             const free = (estimate.quota || 0) - (estimate.usage || 0);
@@ -185,8 +181,10 @@ export async function save(list) {
         // An older copy must not look complete while this one is still being written.
         await game.removeEntry(MARKER).catch(() => {});
 
+        if (bar) bar.show(kept.length);
         const count = await writeTree(game, list, {
             onProgress: (written, total) => {
+                if (bar) bar.update(written);
                 if (written % 100 === 0 && written < total) {
                     console.log(
                         "osiris web: copied " + written + "/" + total + " game files to browser storage"
@@ -200,9 +198,11 @@ export async function save(list) {
         await writable.write(String(count));
         await writable.close();
 
+        if (bar) bar.finish(count);
         console.log("osiris web: game files copied to browser storage (" + count + " files)");
         return count;
     } catch (err) {
+        if (bar) bar.hide();
         console.warn(NO_STORAGE + ": " + (err && err.message ? err.message : err));
         if (root) await removeTree(root);
         return 0;
@@ -210,27 +210,26 @@ export async function save(list) {
 }
 
 /**
- * Mount the game files a finished copy left behind, at `/PharaohData/<path>`, the place
- * `start_game` looks for them.
+ * Hand the game files a finished copy left behind to `onFile` as browser `File`s, under
+ * `PharaohData/`, the folder `start_game` looks for. Nothing is read here: the caller
+ * registers each file and mounts it lazily.
  *
- * @param {(vfsPath: string, bytes: Uint8Array) => void} mount - `mount_file` from main.js.
- * @param {ReturnType<typeof import("./progress.js").createBar>|null} [bar] - the progress bar.
- * @returns {Promise<number>} how many files were mounted, 0 when there is no complete copy.
+ * @param {(path: string, file: File) => void} onFile - `main.js` registers and mounts it.
+ * @returns {Promise<number>} how many files were handed over, 0 when there is no complete copy.
  */
-export async function restore(mount, bar = null) {
+export async function restore(onFile) {
     if (!available()) return 0;
     try {
         const root = await navigator.storage.getDirectory();
         const game = await root.getDirectoryHandle(GAME_DIR);
         if (!(await hasMarker(game))) return 0;
-        return await readTree(game, (path, bytes) => mount("PharaohData/" + path, bytes), bar);
+        return await readTree(game, (path, file) => onFile("PharaohData/" + path, file));
     } catch (err) {
         // A first visit has no `game/` folder at all, which is not worth a warning.
         if (!(err && err.name === "NotFoundError")) {
             console.warn("osiris web: could not read the game files from browser storage: "
                 + (err && err.message ? err.message : err));
         }
-        if (bar) bar.hide();
         return 0;
     }
 }

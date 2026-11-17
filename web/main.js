@@ -8,6 +8,7 @@ import init, {
     list_saves,
     mount_exact,
     mount_file,
+    mount_lazy,
     mount_user_file,
     read_save,
     set_pick_time,
@@ -17,8 +18,9 @@ import init, {
 } from "./pkg/osiris.js";
 import { filesFromDrop, filesFromInput, filesUnder, findGameRoot } from "./folder.js";
 import { fitSize } from "./fit.js";
+import { count as countGameFiles, register as registerGameFile, totalSize as totalGameBytes } from "./files.js";
 import { forget as forgetGameFiles, restore as restoreGameFiles, save as saveGameFiles } from "./opfs.js";
-import { createBar, readAll } from "./progress.js";
+import { createBar } from "./progress.js";
 import { download, formatDate, formatSize, saveName, tooBig } from "./saves.js";
 
 let busy = false;
@@ -63,6 +65,7 @@ globalThis.debug_write_user = debug_write_user;
 globalThis.debug_read_user = debug_read_user;
 globalThis.mount_exact = mount_exact;
 globalThis.mount_file = mount_file;
+globalThis.mount_lazy = mount_lazy;
 globalThis.mount_user_file = mount_user_file;
 globalThis.start_game = start_game;
 // The number `?mission=` gave, so the smoke test can check the URL reached the game.
@@ -352,7 +355,10 @@ function showForget() {
 let storedFiles = 0;
 if (!missionInvalid) {
     try {
-        storedFiles = await restoreGameFiles((path, bytes) => mount_file(path, bytes), progress);
+        storedFiles = await restoreGameFiles((path, file) => {
+            registerGameFile("/" + path, file);
+            mount_lazy(path, file.size);
+        });
     } catch (err) {
         console.warn("osiris web: reading the game files from browser storage failed", err);
     }
@@ -404,11 +410,12 @@ document.addEventListener("fullscreenchange", () => {
 
 /**
  * Copy the picked game files into browser storage for the next load. Runs on its own
- * after the game has started, so it never holds the start up, and never fails it.
+ * after the game has started, so it never holds the start up, and never fails it. It is
+ * the one place left that reads the whole install, so the bar counts this copy.
  */
 async function copyToStorage(files) {
     try {
-        if ((await saveGameFiles(files)) > 0) showForget();
+        if ((await saveGameFiles(files, progress)) > 0) showForget();
     } catch (err) {
         console.warn("osiris web: keeping the game files in browser storage failed", err);
     }
@@ -443,18 +450,20 @@ async function loadFolder(list) {
 
     const started = performance.now();
 
+    // Nothing is read here. Each file stays where the browser already has it (a `File`
+    // from the pick sits on disk) and the store is told only its path and size; the
+    // game's read of that path copies just that file into wasm memory (`web/files.js`,
+    // `web-lazy`), so the whole install is never in memory at once.
     // Everything under the root is mounted under /PharaohData, the folder `start_game`
     // looks for, so the game does not care how deep the root sat in the chosen folder.
-    // The bar says how far the read has got, and `readAll` keeps eight reads going at the
-    // same time; `design.md` records that this is the faster of the two measured ways.
-    await readAll(
-        files,
-        (entry) => entry.file.arrayBuffer(),
-        (entry, bytes) => mount_file("PharaohData/" + entry.path, new Uint8Array(bytes)),
-        progress
-    );
+    for (const entry of files) {
+        const path = "PharaohData/" + entry.path;
+        registerGameFile("/" + path, entry.file);
+        mount_lazy(path, entry.file.size);
+    }
     console.log(
-        "osiris web: read " + files.length + " files in " +
+        "osiris web: indexed " + countGameFiles() + " files (" +
+        Math.round(totalGameBytes() / (1024 * 1024)) + " MB) in " +
         Math.round(performance.now() - started) + " ms"
     );
 

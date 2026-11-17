@@ -2062,10 +2062,16 @@ async function run() {
                     return;
                 }
             } else {
-                // Mount all game files by fetching from the test server and using mount_file.
-                // Use paths like "PharaohData/..." so mount_file creates /PharaohData/...
+                // Mount all game files lazily: each fetched file becomes a browser `File`,
+                // the page registers it, and the store is told only its path and size. The
+                // game's read of a path then copies just that file into wasm memory, so the
+                // whole install is never in memory at once (`web-lazy`). The bytes live in
+                // the page's heap, not in wasm memory, which is what the soak memory
+                // number measures.
                 await page.evaluate(async ([paths, base]) => {
                     let count = 0;
+                    let bytes = 0;
+                    const started = performance.now();
                     for (const rel of paths) {
                         const vfsPath = "PharaohData/" + rel;
                         const resp = await fetch(base + "game-data-staging/PharaohData/" + rel);
@@ -2073,13 +2079,20 @@ async function run() {
                             console.error("Failed to fetch " + rel + ": " + resp.status);
                             continue;
                         }
-                        const buf = new Uint8Array(await resp.arrayBuffer());
-                        mount_file(vfsPath, buf);
+                        const file = new File([await resp.blob()], rel.split("/").pop());
+                        osirisFiles.register("/" + vfsPath, file);
+                        mount_lazy(vfsPath, file.size);
                         count++;
+                        bytes += file.size;
                         if (count % 50 === 0) {
-                            console.log("osiris web: mounted " + count + "/" + paths.length + " files");
+                            console.log("osiris web: indexed " + count + "/" + paths.length + " files");
                         }
                     }
+                    console.log(
+                        "osiris web: indexed " + count + " files (" +
+                        Math.round(bytes / (1024 * 1024)) + " MB) in " +
+                        Math.round(performance.now() - started) + " ms"
+                    );
                 }, [relPaths, BASE]);
             }
 

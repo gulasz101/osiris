@@ -140,8 +140,12 @@ await writeTree(game, [entry(".complete", "3")]);
 check("marker after the copy finished", await hasMarker(game), true);
 
 // ── Reading it back ────────────────────────────────────────────────
+const handed = [];
+const read = await readTree(game, (path, file) => handed.push([path, file]));
 const back = [];
-const read = await readTree(game, (path, bytes) => back.push([path, new TextDecoder().decode(bytes)]));
+for (const [path, file] of handed) {
+    back.push([path, new TextDecoder().decode(new Uint8Array(await file.arrayBuffer()))]);
+}
 back.sort();
 check("files read back", read, 3);
 check("paths and bytes read back", back, [

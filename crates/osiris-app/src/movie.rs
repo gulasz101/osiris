@@ -26,6 +26,11 @@ const TEXTURE_KEY: u32 = 0x4249_4b00;
 /// Frames decoded ahead of the one on screen.
 const AHEAD: usize = 6;
 
+/// Frames the browser's `update()` decodes at most, so the main thread never spends a
+/// whole frame in the decoder.
+#[cfg(target_arch = "wasm32")]
+const PER_UPDATE: usize = 2;
+
 /// The movie file called `name`, if the install has it.
 pub fn path(data: &Path, name: &str) -> Option<PathBuf> {
     let dir = data.join("BINKS").join("High");
@@ -146,9 +151,107 @@ impl Movie {
         }
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        self.decode_some();
+        let t = self.clock();
+        self.advance_to(t);
+        if self.done {
+            self.log_done();
+        }
+    }
 
-    pub fn seek_blocking(&mut self, _seconds: f64) {}
+    /// Decodes up to `seconds` in, for a screenshot of that moment.
+    pub fn seek_blocking(&mut self, seconds: f64) {
+        let target = (seconds * self.fps) as usize;
+        while self.shown.is_none_or(|s| s < target) && !self.decoded_all {
+            self.decode_some();
+            while let Some((i, rgba)) = self.queue.pop_front() {
+                self.shown = Some(i);
+                self.picture = rgba;
+                self.dirty = true;
+                if i >= target {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Decodes a couple of frames into the queue, up to `AHEAD` of the one on screen.
+    ///
+    /// The desktop decodes on its own thread, as fast as it can. Here the frames and the
+    /// sound samples they carry come out of the same loop, so the queue has to stay ahead
+    /// of the clock: sound taken from the queue is the clock, and a queue that ran dry
+    /// would freeze the clock and the movie with it.
+    fn decode_some(&mut self) {
+        let mut samples = Vec::new();
+        for _ in 0..PER_UPDATE {
+            if self.decoded_all || self.queue.len() >= AHEAD {
+                return;
+            }
+            // The sound was dropped (a skip): nothing more is wanted.
+            if let Some(feed) = &self.feed
+                && feed.stopped()
+            {
+                return;
+            }
+            samples.clear();
+            let index = self.bink.position();
+            match self.bink.next_frame(&mut samples) {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.end_of_frames();
+                    return;
+                }
+                Err(e) => {
+                    log::warn!("movie {} frame {index}: {e}", self.name);
+                    self.end_of_frames();
+                    return;
+                }
+            }
+            if let Some(feed) = &self.feed {
+                feed.push(&samples);
+            }
+            let mut rgba = vec![0; self.width as usize * self.height as usize * 4];
+            self.bink.to_rgba(&mut rgba);
+            self.queue.push_back((index, rgba));
+            if index > 0 && index % 30 == 0 {
+                log::info!("osiris web: movie {} frame {index}", self.name);
+            }
+        }
+    }
+
+    /// No more frames will come: the sound plays its last samples and then counts
+    /// silence, so the pictures left still get their time.
+    fn end_of_frames(&mut self) {
+        self.decoded_all = true;
+        if let Some(feed) = &self.feed {
+            feed.finish();
+        }
+    }
+
+    /// Takes the frames that are due by `t`, keeping the latest to show.
+    fn advance_to(&mut self, t: Duration) {
+        let due = (t.as_secs_f64() * self.fps) as usize;
+        while self.queue.front().is_some_and(|(i, _)| *i <= due) {
+            let Some((i, rgba)) = self.queue.pop_front() else { break };
+            self.shown = Some(i);
+            self.picture = rgba;
+            self.dirty = true;
+        }
+        // Over once the last frame has had its time on screen.
+        if self.decoded_all && self.queue.is_empty() && t.as_secs_f64() >= self.frames as f64 / self.fps {
+            self.done = true;
+        }
+    }
+
+    /// Says once, in the browser log, that the movie is over.
+    fn log_done(&mut self) {
+        if self.logged_done {
+            return;
+        }
+        self.logged_done = true;
+        log::info!("osiris web: movie {} done", self.name);
+    }
 }
 
 impl Movie {
@@ -160,6 +263,8 @@ impl Movie {
 
     pub fn skip(&mut self) {
         self.done = true;
+        #[cfg(target_arch = "wasm32")]
+        self.log_done();
     }
 
     /// The picture's place on a screen: as large as fits, keeping its shape, centred.

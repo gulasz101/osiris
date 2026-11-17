@@ -1466,15 +1466,35 @@ impl Menu {
             ],
             Page::NewFamily => vec![(NEW_FAMILY_GO, "Go(Family)", self.family_text.continue_button.as_str())],
             Page::Briefing => vec![(BRIEF_GO, "ToCity", "")],
+            // The campaign's window: the history tab opens the mission list, and the
+            // arrow starts the picked period. Both are how a player reaches a mission.
+            Page::HistoryPeriods => vec![(TAB_MISSIONS, "Go(Campaign)", "missions"), (EXIT_BUTTON, "Go(Main)", "exit")],
+            Page::Periods => vec![(PLAY_BUTTON, "Go(Campaign)", "play")],
+            // The mission list's arrow starts the picked mission.
+            Page::Campaign => vec![(PLAY_BUTTON, "Choose(StartMission)", "play")],
             _ => Vec::new(),
         };
-        let frame = if matches!(self.page, Page::Main | Page::Options | Page::Load | Page::Family | Page::NewFamily) { Self::main_frame(screen) } else { Frame::new(screen) };
+        let frame = match self.page {
+            Page::Main | Page::Options | Page::Load | Page::Family | Page::NewFamily => Self::main_frame(screen),
+            _ => Frame::new(screen),
+        };
         for (rect, action, label) in fixed {
             if self.page == Page::Briefing && self.briefing.is_none() {
                 continue;
             }
             let r = [frame.o[0] + rect[0] * frame.s, frame.o[1] + rect[1] * frame.s, rect[2] * frame.s, rect[3] * frame.s];
             buttons.push((action.to_owned(), label.to_owned(), r));
+        }
+        // A popup takes the click, so it comes before the page's own buttons: Yes is the page
+        // it opens, No cancels.
+        if self.explore_confirm {
+            let frame = Self::main_frame(screen);
+            let at = |rect: [f32; 4]| {
+                let [x, y, w, h] = [POPUP[0] + rect[0], POPUP[1] + rect[1], rect[2], rect[3]];
+                [frame.o[0] + x * frame.s, frame.o[1] + y * frame.s, w * frame.s, h * frame.s]
+            };
+            buttons.insert(0, ("Go(Main)".to_owned(), "no".to_owned(), at(POPUP_NO)));
+            buttons.insert(0, ("Go(HistoryPeriods)".to_owned(), "yes".to_owned(), at(POPUP_YES)));
         }
         let json = buttons
             .iter()

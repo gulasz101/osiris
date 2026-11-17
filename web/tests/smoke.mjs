@@ -121,6 +121,19 @@ function stageFiles(osirisData, relPaths) {
     return stagingDir;
 }
 
+/**
+ * Click a menu button and wait for the page it opens. The click is sent again if the page
+ * does not change within `ms`, since a frame boundary can swallow one.
+ */
+async function clickMenuTo(prefix, pageName, { last = false, ms = 15_000 } = {}) {
+    for (let tries = 0; tries < 3; tries += 1) {
+        const from = consoleMessages.length;
+        await clickMenu(prefix, last);
+        if (await waitPage(pageName, ms, from)) return true;
+    }
+    return false;
+}
+
 /** Wait until `predicate()` is true, or `ms` runs out. Returns whether it became true. */
 async function until(predicate, ms, step = 250) {
     const deadline = Date.now() + ms;
@@ -247,10 +260,17 @@ function waitPage(name, ms = 60_000, from = 0) {
  * would: read the button's rect, add the canvas's place in the page, click its centre.
  */
 async function clickMenu(prefix, last = false) {
-    const buttons = await menuButtons();
-    const matching = buttons.filter((b) => b.action.startsWith(prefix));
-    const hit = last ? matching[matching.length - 1] : matching[0];
+    // The buttons are recorded as the page is drawn, so a page the game has just changed
+    // to may still report the one before it: wait for the button to turn up.
+    let hit = null;
+    const deadline = Date.now() + 15_000;
+    while (!hit && Date.now() < deadline) {
+        const matching = (await menuButtons()).filter((b) => b.action.startsWith(prefix));
+        if (matching.length > 0) hit = last ? matching[matching.length - 1] : matching[0];
+        else await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     if (!hit) {
+        const buttons = await menuButtons();
         throw new Error("no menu button starts with " + JSON.stringify(prefix) + "; the page has " + JSON.stringify(buttons.map((b) => b.action)));
     }
     const origin = await canvasOrigin();
@@ -291,6 +311,10 @@ async function runMenuMission() {
         return;
     }
 
+    // The family's own file proves the typed name reached the game.
+    const made = await page.evaluate(() => debug_read_user("families/smoke/name.txt"));
+    console.log("osiris web: the family's name.txt reads " + JSON.stringify(made ?? null));
+
     // Pick the family just made and go on to its menu.
     from = consoleMessages.length;
     await clickMenu('Choose(Family("');
@@ -302,17 +326,18 @@ async function runMenuMission() {
         return;
     }
 
-    // The campaign's first mission, and its briefing.
-    from = consoleMessages.length;
-    await clickMenu("Go(Campaign)");
-    if (!(await waitPage("campaign", 60_000, from))) {
+    // The family history's mission list. Explore History's tab opens it directly, which is
+    // the way to a mission that does not play the period's opening movie first.
+    if (!(await clickMenuTo("Go(HistoryPeriods)", "historyperiods")) || !(await clickMenuTo("Go(Campaign)", "campaign"))) {
         console.error("FAIL: the campaign's mission list never came up");
+        for (const m of consoleMessages) console.log(m);
         process.exitCode = 1;
         return;
     }
-    from = consoleMessages.length;
+    // The campaign's first mission, and its briefing: a click on the row picks it and the
+    // list's arrow starts it.
     await clickMenu("Choose(Mission");
-    if (!(await waitPage("briefing", 60_000, from))) {
+    if (!(await clickMenuTo("Choose(StartMission)", "briefing", { ms: 60_000 }))) {
         console.error("FAIL: the briefing never came up");
         process.exitCode = 1;
         return;
@@ -418,7 +443,11 @@ async function run() {
         page = await browser.newPage();
 
         page.on("console", (msg) => {
-            consoleMessages.push(`[${msg.type().slice(0, 1)}] ${msg.text()}`);
+            const line = `[${msg.type().slice(0, 1)}] ${msg.text()}`;
+            consoleMessages.push(line);
+            // The menu's page changes are printed as they happen, so a failed walk of the
+            // menu shows where it went instead of only where it stopped.
+            if (line.includes("osiris web: page ")) console.log("osiris web: saw " + line);
         });
 
         try {

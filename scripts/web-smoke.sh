@@ -29,6 +29,11 @@ fi
 if [ -n "${SMOKE_SAVES:-}" ]; then
     TIMEOUT=1200
 fi
+# A right-click run walks the menu to a city, puts a tool in hand and drops it with one right
+# click; it is a mission run, so it gets the mission timeout.
+if [ -n "${SMOKE_RIGHTCLICK:-}" ]; then
+    TIMEOUT=600
+fi
 # A soak run plays 24 months of a city, then a custom map and the editor.
 if [ -n "${SMOKE_SOAK:-}" ]; then
     TIMEOUT=1800

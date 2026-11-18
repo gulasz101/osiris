@@ -120,6 +120,19 @@ if ((VIEWPORT?.length ?? 0) > 0 && (INTRO || WRAP !== "" || REMEMBER)) {
     console.error("FAIL: SMOKE_VIEWPORT runs on its own, with no SMOKE_MOVIE, SMOKE_WRAP or SMOKE_REMEMBER");
     process.exit(1);
 }
+// `SMOKE_RIGHTCLICK=1` runs the game's own right click: a right-click with a tool in hand
+// from the menu's sidebar drops the tool and closes the menu. It runs with `SMOKE_MISSION=menu`
+// only, like `SMOKE_VIEWPORT`.
+const RIGHTCLICK_RAW = (process.env.SMOKE_RIGHTCLICK ?? "").trim();
+const RIGHTCLICK = RIGHTCLICK_RAW === "1";
+if (RIGHTCLICK_RAW !== "" && !RIGHTCLICK) {
+    console.error("FAIL: SMOKE_RIGHTCLICK must be 1 or unset (got " + RIGHTCLICK_RAW + ")");
+    process.exit(1);
+}
+if (RIGHTCLICK && !MENU) {
+    console.error("FAIL: SMOKE_RIGHTCLICK runs with SMOKE_MISSION=menu");
+    process.exit(1);
+}
 // `1` hands the staged files to the page's own folder picker, so the page's reading path
 // (its progress bar and its read time) is what runs, and then goes on with the ordinary
 // checks. `design.md` records the numbers this mode measured.

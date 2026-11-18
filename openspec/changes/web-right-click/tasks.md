@@ -40,7 +40,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
 
 ## 2. The browser smoke flow
 
-- [ ] 2.1 In `web/tests/smoke.mjs`, add `SMOKE_RIGHTCLICK=1` (copy how `SMOKE_VIEWPORT` is read at
+- [x] 2.1 In `web/tests/smoke.mjs`, add `SMOKE_RIGHTCLICK=1` (copy how `SMOKE_VIEWPORT` is read at
       the top of the file). It runs with `SMOKE_MISSION=menu` only, like `SMOKE_VIEWPORT`. In
       `scripts/web-smoke.sh`, pass it through the same way as the other `SMOKE_*` variables.
       Check: `node --check web/tests/smoke.mjs` and `bash -n scripts/web-smoke.sh` pass.

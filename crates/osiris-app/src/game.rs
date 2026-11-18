@@ -138,7 +138,7 @@ pub struct Game {
     entries: Vec<Entry>,
     hover: Option<(i32, i32)>,
     cursor: [f32; 2],
-    drag_start: Option<(i32, i32)>,
+    pub(crate) drag_start: Option<(i32, i32)>,
     accumulator: f32,
     /// How far into the current tick the frame falls (0..=1), when figures are drawn
     /// gliding between ticks (see `motion.rs`); `None` draws them where they stand.

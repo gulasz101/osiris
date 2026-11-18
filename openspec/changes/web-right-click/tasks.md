@@ -32,7 +32,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
       `game.sidebar.open.is_none()`.
       Check: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohData/Akhenaten/resources cargo test -p osiris-app one_right_click --quiet`
       prints `1 passed` (not `0 passed`; 0 means the data folder was not found).
-- [ ] 1.3 Add a second test in the same place, `a_right_click_during_a_drag_keeps_the_tool`:
+- [x] 1.3 Add a second test in the same place, `a_right_click_during_a_drag_keeps_the_tool`:
       `game.tool = Tool::Road`, `game.drag_start = Some((10, 10))`, one `"back"` step, then
       assert `game.drag_start.is_none()` and `game.tool == Tool::Road`. `drag_start` is a private
       field (`game.rs:141`); change it to `pub(crate) drag_start` so the test can set it.

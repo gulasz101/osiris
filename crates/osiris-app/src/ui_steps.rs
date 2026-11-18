@@ -399,6 +399,17 @@ mod tests {
     }
 
     #[test]
+    fn a_right_click_during_a_drag_keeps_the_tool() {
+        play(&format!("{TOWN}; ticks 4000"), |game, r| {
+            game.tool = Tool::Road;
+            game.drag_start = Some((10, 10));
+            step(game, r, "back");
+            assert!(game.drag_start.is_none());
+            assert_eq!(game.tool, Tool::Road);
+        });
+    }
+
+    #[test]
     fn a_transport_carries_a_company_across_by_its_window() {
         play(&format!("{TOWN}; {FORT}; ticks 9000"), |game, r| {
             let t = ship_of(game, TRANSPORT);

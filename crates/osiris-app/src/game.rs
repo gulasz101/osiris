@@ -1393,11 +1393,16 @@ impl Game {
         if self.selected_company.take().is_some() || self.selected_ship.take().is_some() {
             return;
         }
-        if self.sidebar.open.take().is_some() {
+        if self.tool != Tool::None {
+            // A right-click during a left-drag placement cancels the drag only.
+            if self.drag_start.take().is_none() {
+                self.tool = Tool::None;
+                self.sidebar.open = None;
+            }
             return;
         }
-        if self.drag_start.take().is_none() {
-            self.tool = Tool::None;
+        if self.sidebar.open.take().is_some() {
+            return;
         }
     }
 

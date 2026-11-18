@@ -5,7 +5,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
 
 ## 1. One right-click drops the tool
 
-- [ ] 1.1 In `Game::cancel()` (`crates/osiris-app/src/game.rs`, about line 1359), move the tool
+- [x] 1.1 In `Game::cancel()` (`crates/osiris-app/src/game.rs`, about line 1359), move the tool
       step up so it runs right after the `selected_company` / `selected_ship` step and before the
       `self.sidebar.open` step. The new step:
       ```rust

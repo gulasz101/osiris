@@ -22,7 +22,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
       the old last step (`if self.drag_start.take().is_none() { self.tool = Tool::None; }`), which
       the new step replaces. If `Tool` has no `PartialEq`, use `!matches!(self.tool, Tool::None)`.
       Check: `cargo test -p osiris-app --quiet` passes.
-- [ ] 1.2 Add a unit test in `crates/osiris-app/src/ui_steps.rs`, next to
+- [x] 1.2 Add a unit test in `crates/osiris-app/src/ui_steps.rs`, next to
       `a_warship_takes_each_order_from_its_window`, named
       `one_right_click_drops_the_tool_with_the_menu_open`. Use `play(...)` like the tests around
       it. Set `game.tool = Tool::Build(<any house type the sidebar offers>)` and

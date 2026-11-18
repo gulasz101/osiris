@@ -236,8 +236,11 @@ fn report(game: &Game) {
 mod tests {
     use super::*;
     use crate::game::ShipClick;
+    use crate::game::Tool;
     use crate::info::Target;
+    use crate::sidebar::Category;
     use osiris_sim::Command;
+    use osiris_sim::buildings::kind;
     use osiris_sim::figures::FigureId;
     use osiris_sim::navy::{ShipOrder, TRANSPORT, WARSHIP, ship};
     use osiris_sim::replay::Entry;
@@ -379,6 +382,19 @@ mod tests {
             assert_eq!(game.selected_ship, Some((w, ShipClick::Move)));
             step(game, r, "key h");
             assert_eq!(commands(game, &mut seen), [Command::ShipOrder { ship: w, order: ShipOrder::Hold }]);
+        });
+    }
+
+    #[test]
+    fn one_right_click_drops_the_tool_with_the_menu_open() {
+        play(&format!("{TOWN}; ticks 4000"), |game, r| {
+            // A house tool in hand, with its build menu still open: one right click
+            // drops the tool and closes the menu.
+            game.tool = Tool::Build(kind::VACANT_LOT);
+            game.sidebar.open = Some(Category::Housing);
+            step(game, r, "back");
+            assert_eq!(game.tool, Tool::None);
+            assert!(game.sidebar.open.is_none());
         });
     }
 

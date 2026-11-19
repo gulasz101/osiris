@@ -210,6 +210,11 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   only the page and the wasm, and GitHub Pages serves it (`web-pages`). `sh scripts/pages-site.sh`
   prints `check-site: OK`, and `SMOKE_ROOT=$PWD/out/site SMOKE_BASE=/osiris/ node web/tests/smoke.mjs`
   prints `osiris web: base OK (/osiris/)`.
+- **The game's own cursors.** The canvas wears the game's arrow, its shovel for Clear Land and
+  its sword while a company or a warship has orders, read out of the player's `Pharaoh.exe`
+  (`web-cursor`). `OSIRIS_DATA=<folder> SMOKE_MISSION=menu SMOKE_CURSOR=1
+  scripts/web-smoke.sh` prints `osiris web: cursor OK (arrow -> shovel -> arrow)`. Without an exe,
+  or with one whose cursors do not decode, the game keeps the system pointer and starts anyway.
 
 ## 3. Missing or different from desktop
 

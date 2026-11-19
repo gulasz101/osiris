@@ -1,7 +1,9 @@
 # web-right-click Specification
 
 ## Purpose
-TBD - created by archiving change web-right-click. Update Purpose after archive.
+
+Let the player put down the tool in hand, or cancel a drag, with one right click, so a tool
+picked from the sidebar never traps them in the browser or on the desktop.
 
 ## Requirements
 

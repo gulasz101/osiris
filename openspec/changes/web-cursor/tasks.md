@@ -28,7 +28,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       row because rows are bottom-up); the bottom row is 4 white then 4 black pixels with alpha
       255. A 24-bit header gives `None`. A 5-byte buffer gives `None`.
       Check: `cargo test -p osiris-formats cursor --quiet` passes, 3 or more tests.
-- [ ] 1.4 Test against the real exe, in `cursor.rs`:
+- [x] 1.4 Test against the real exe, in `cursor.rs`:
       `#[test] fn the_players_exe_has_the_three_cursors()`. It reads
       `std::env::var("OSIRIS_TEST_DATA")` + `/Pharaoh.exe` and returns early (passes) when the
       variable or the file is missing. For groups 102, 130, 136 it asserts size, hotspot and the

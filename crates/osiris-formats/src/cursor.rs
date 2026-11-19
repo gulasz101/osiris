@@ -199,4 +199,41 @@ mod tests {
     fn a_short_buffer_gives_nothing() {
         assert_eq!(decode(&[0u8; 5]), None);
     }
+
+    /// The real `Pharaoh.exe`, when the machine has one: the three cursors the game uses
+    /// must decode to the size, hotspot and colours measured on the player's copy. Skipped
+    /// (and so passing) when `OSIRIS_TEST_DATA` or the exe is missing.
+    #[test]
+    fn the_players_exe_has_the_three_cursors() {
+        let Ok(dir) = std::env::var("OSIRIS_TEST_DATA") else {
+            return;
+        };
+        let Ok(exe) = std::fs::read(std::path::Path::new(&dir).join("Pharaoh.exe")) else {
+            return;
+        };
+        // group, name, hotspot, opaque pixels, white pixels, black pixels
+        let expected = [
+            (102, "arrow", (0, 0), 135, 81, 54),
+            (130, "shovel", (8, 31), 301, 142, 159),
+            (136, "sword", (0, 0), 168, 82, 86),
+        ];
+        for (group, name, hot, opaque, white, black) in expected {
+            let image = from_exe(&exe, group)
+                .unwrap_or_else(|| panic!("group {group} ({name}) does not decode"));
+            let pixels = image.rgba.chunks_exact(4);
+            let count = |want: [u8; 4]| pixels.clone().filter(|p| *p == want).count();
+            let opaque_pixels = pixels.clone().filter(|p| p[3] == 255).count();
+            let (white_pixels, black_pixels) = (count([255, 255, 255, 255]), count([0, 0, 0, 255]));
+            eprintln!(
+                "group {group} ({name}): {}x{}, hotspot {},{}: {opaque_pixels} opaque, \
+                 {white_pixels} white, {black_pixels} black",
+                image.width, image.height, image.hot_x, image.hot_y
+            );
+            assert_eq!((image.width, image.height), (32, 32), "group {group} ({name}) size");
+            assert_eq!((image.hot_x, image.hot_y), hot, "group {group} ({name}) hotspot");
+            assert_eq!(opaque_pixels, opaque, "group {group} ({name}) opaque pixels");
+            assert_eq!(white_pixels, white, "group {group} ({name}) white pixels");
+            assert_eq!(black_pixels, black, "group {group} ({name}) black pixels");
+        }
+    }
 }

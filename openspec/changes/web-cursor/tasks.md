@@ -10,7 +10,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       `pub fn resource(exe: &[u8], kind: u32, id: u32) -> Option<&[u8]>`, exactly as design
       section 1, and `pub mod pe;` in `lib.rs`. Use checked reads (`get(..)?`), no panics.
       Check: `cargo test -p osiris-formats --quiet` passes.
-- [ ] 1.2 Unit test in `pe.rs`: a test helper `fn tiny_pe(kind: u32, id: u32, data: &[u8]) -> Vec<u8>`
+- [x] 1.2 Unit test in `pe.rs`: a test helper `fn tiny_pe(kind: u32, id: u32, data: &[u8]) -> Vec<u8>`
       builds a 0x400-byte PE32 by hand: `MZ`, `e_lfanew = 0x40`, `PE\0\0` at 0x40, 1 section,
       `opt_size = 0xE0`, magic 0x10B, resource directory entry (at 0xC8) `rva = 0x1000`;
       section header at 0x138 with `virtual_address = 0x1000`, `virtual_size = raw_size = 0x200`,

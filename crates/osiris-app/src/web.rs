@@ -213,7 +213,7 @@ pub fn set_debug_city(json: String) {
 
 /// The city's state as JSON, the way `main.rs` last built it: `{"idle":true,"lost":false,
 /// "paused":false,"messages":0,"dialog":false,"confirm":false,"custom":false,
-/// "tool":"none"}`.
+/// "tool":"none","cursor":"arrow"}`.
 #[wasm_bindgen]
 pub fn debug_city() -> String {
     DEBUG_CITY.with(|cell| cell.borrow().clone())

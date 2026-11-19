@@ -15,6 +15,17 @@ pub enum CursorKind {
     Sword,
 }
 
+impl CursorKind {
+    /// The name the browser's debug JSON and the smoke test use.
+    pub fn name(self) -> &'static str {
+        match self {
+            CursorKind::Arrow => "arrow",
+            CursorKind::Shovel => "shovel",
+            CursorKind::Sword => "sword",
+        }
+    }
+}
+
 /// The cursor for the current state: the sword while a company of soldiers or a warship is
 /// selected and takes orders, the shovel while the clear-land tool is in hand, and the arrow
 /// everywhere else. Building tools keep the arrow: the ghost on the map already shows what is

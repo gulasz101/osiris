@@ -1980,7 +1980,11 @@ impl App {
                     // What is holding the city, so the smoke test can see why an Escape did
                     // not ask "Leave the Kingdom?" (web-soak).
                     let tool = format!("{:?}", game.tool).to_lowercase();
-                    crate::web::set_debug_city(soak::city_json(game.soak_state(), &tool));
+                    let kind = cursor::kind_for(
+                        game.tool,
+                        game.selected_company.is_some() || game.selected_ship.is_some(),
+                    );
+                    crate::web::set_debug_city(soak::city_json(game.soak_state(), &tool, kind.name()));
                     let month = game.world.time.month;
                     match self.web_month {
                         Some(last) if last != month => {

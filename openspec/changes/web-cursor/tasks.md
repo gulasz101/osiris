@@ -44,7 +44,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       `(Tool::Clear, false)` -> Shovel, `(Tool::Road, false)` -> Arrow, `(Tool::Build(1), false)`
       -> Arrow, `(Tool::Clear, true)` -> Sword, `(Tool::None, true)` -> Sword.
       Check: `cargo test -p osiris-app cursor --quiet` passes.
-- [ ] 2.2 In the same file, `Cursors` with `load` and `get` (design section 3). Look up
+- [x] 2.2 In the same file, `Cursors` with `load` and `get` (design section 3). Look up
       `CustomCursor::from_rgba` and `create_custom_cursor` in docs-mcp `winit` first.
       Check: `cargo test -p osiris-app --quiet` and
       `cargo check --target wasm32-unknown-unknown -p osiris-app` both pass.

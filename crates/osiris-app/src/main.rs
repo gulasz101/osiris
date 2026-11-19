@@ -611,6 +611,11 @@ struct App {
     /// Where a right-click began with nothing open, to inspect the tile if it isn't a drag.
     inspect: Option<(f64, f64)>,
     cursor: (f64, f64),
+    /// The game's own three cursor pictures, `None` when the player's `Pharaoh.exe` is
+    /// missing or a cursor does not decode: then the system cursor stays.
+    cursors: Option<cursor::Cursors>,
+    /// The picture last set on the window, so a redraw sets it only when it changes.
+    cursor_kind: Option<cursor::CursorKind>,
     /// Whether the cursor is over the window, which is focused: only then does the
     /// screen's edge scroll the city.
     cursor_in: bool,
@@ -666,6 +671,17 @@ struct App {
 }
 
 impl App {
+    /// Loads the game's cursors out of the player's `Pharaoh.exe` now that the window exists,
+    /// and shows the arrow. A missing exe or a cursor that does not decode leaves the system
+    /// cursor in place and logs one line; the game still starts.
+    fn load_cursors(&mut self, event_loop: &ActiveEventLoop, window: &Window) {
+        self.cursors = cursor::Cursors::load(event_loop, &self.assets.data);
+        if let Some(cursors) = &self.cursors {
+            window.set_cursor(cursors.get(cursor::CursorKind::Arrow).clone());
+            self.cursor_kind = Some(cursor::CursorKind::Arrow);
+        }
+    }
+
     /// Saves directory for the active family, or the pre-family default when none is
     /// chosen yet (used by `--map`/`--mission` direct launches, which skip the menu).
     fn saves_dir(&self) -> PathBuf {
@@ -1361,6 +1377,9 @@ impl ApplicationHandler for App {
             };
             self.images = Some(images);
             self.gfx = Some(gfx);
+            if let Some(window) = self.gfx.as_ref().map(|gfx| gfx.window.clone()) {
+                self.load_cursors(event_loop, &window);
+            }
             self.finish_start(event_loop);
         }
 
@@ -1408,6 +1427,7 @@ impl ApplicationHandler for App {
                     return;
                 }
             };
+            self.load_cursors(event_loop, &window);
 
             // Store the pending handle so window_event can pick it up.
             let pending = self.pending.clone();
@@ -2622,6 +2642,8 @@ pub(crate) fn run_loaded(args: Args, data: PathBuf, library: ImageLibrary, asset
         drag: None,
         inspect: None,
         cursor: (0.0, 0.0),
+        cursors: None,
+        cursor_kind: None,
         cursor_in: false,
         focused: true,
         sound,

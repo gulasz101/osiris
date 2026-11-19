@@ -48,7 +48,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       `CustomCursor::from_rgba` and `create_custom_cursor` in docs-mcp `winit` first.
       Check: `cargo test -p osiris-app --quiet` and
       `cargo check --target wasm32-unknown-unknown -p osiris-app` both pass.
-- [ ] 2.3 `main.rs`: the two `App` fields, load after each `create_window` and set the arrow
+- [x] 2.3 `main.rs`: the two `App` fields, load after each `create_window` and set the arrow
       (design section 4).
       Check: both commands from 2.2 pass.
 - [ ] 2.4 `main.rs`: set the cursor in `RedrawRequested` when the kind changes (design section 4).

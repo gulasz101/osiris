@@ -55,7 +55,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
       Print `osiris web: right click OK (road -> none, no context menu)`, or `FAIL: right click ...`
       with what `debug_city()` said, and exit 1.
       Check: `node --check web/tests/smoke.mjs` passes.
-- [ ] 2.3 Run it: `OSIRIS_DATA=/Users/paperclip/PharaohData/Akhenaten/resources SMOKE_MISSION=menu SMOKE_RIGHTCLICK=1 timeout 600 scripts/web-smoke.sh`.
+- [x] 2.3 Run it: `OSIRIS_DATA=/Users/paperclip/PharaohData/Akhenaten/resources SMOKE_MISSION=menu SMOKE_RIGHTCLICK=1 timeout 600 scripts/web-smoke.sh`.
       Check: the output has `osiris web: right click OK`. If it fails with the 1.1 change in place,
       do not change the design: commit what you have, write the exact `FAIL` line and the
       `debug_city()` JSON in the issue comment, and set the issue `blocked`.

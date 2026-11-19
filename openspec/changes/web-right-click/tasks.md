@@ -44,7 +44,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
       the top of the file). It runs with `SMOKE_MISSION=menu` only, like `SMOKE_VIEWPORT`. In
       `scripts/web-smoke.sh`, pass it through the same way as the other `SMOKE_*` variables.
       Check: `node --check web/tests/smoke.mjs` and `bash -n scripts/web-smoke.sh` pass.
-- [ ] 2.2 The flow, after the city has started (put it where the other city flows run): register
+- [x] 2.2 The flow, after the city has started (put it where the other city flows run): register
       `page.on("console")` is already there; add, before the city starts,
       `await page.evaluate(() => { window.__contextmenus = 0; document.addEventListener("contextmenu", e => { if (!e.defaultPrevented) window.__contextmenus += 1; }); })`.
       Then: click the sidebar's road button (find its rectangle in

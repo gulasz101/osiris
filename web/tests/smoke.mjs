@@ -770,6 +770,18 @@ async function enterFirstMission(family) {
         return false;
     }
 
+    // SMOKE_RIGHTCLICK=1: from before the city starts, count the context menus the browser
+    // itself would open. The canvas's own listener calls `preventDefault` on them (winit's
+    // `set_prevent_default`), so the count must stay 0 when a right-click drops the tool.
+    if (RIGHTCLICK) {
+        await page.evaluate(() => {
+            window.__contextmenus = 0;
+            document.addEventListener("contextmenu", (e) => {
+                if (!e.defaultPrevented) window.__contextmenus += 1;
+            });
+        });
+    }
+
     // On to the city. A mission opens messages when it starts, and the game stands still
     // while one is up, so press Escape now and then and let the city run.
     from = consoleMessages.length;
@@ -818,6 +830,60 @@ async function runMenuMission() {
         process.exitCode = 1;
     } else {
         console.log("osiris web: the menu started a city that ran " + months.length + " months: " + months.join(", "));
+    }
+}
+
+/**
+ * SMOKE_RIGHTCLICK=1: one right-click with a tool in hand puts the tool down. Picks the road
+ * category from the sidebar, whose button sits 9 from the panel's left edge and 330 below the
+ * screen top, 34 by 50 (`sidebar.rs`'s full panel), then right-clicks the city view once.
+ * `debug_city()` must go from `"road"` to `"none"`, and the browser's own context menu must
+ * not have opened.
+ */
+async function runRightClick() {
+    // A message or a briefing would take the first click, so let the city stand idle first.
+    const settled = await settleCity();
+    if (!settled.ok) {
+        console.error("FAIL: right click: the city never became idle, debug_city() said " + (await cityState()));
+        process.exitCode = 1;
+        return;
+    }
+    // The full panel is 186 wide against the right edge of the canvas, and the smoke run
+    // sizes the canvas itself (1280x768), so the button's centre is (1120, 355).
+    const origin = await canvasOrigin();
+    const screen = await page.evaluate(() => {
+        const canvas = document.getElementById("osiris");
+        return { width: canvas.width, height: canvas.height };
+    });
+    await page.mouse.click(origin.left + screen.width - 186 + 9 + 34 / 2, origin.top + 330 + 50 / 2);
+    let state = await cityStateJson();
+    const picked = Date.now() + 3_000;
+    while (state?.tool !== "road" && Date.now() < picked) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        state = await cityStateJson();
+    }
+    if (state?.tool !== "road") {
+        console.error("FAIL: right click: the sidebar's road button did not put a tool in hand, debug_city() said " + JSON.stringify(state));
+        process.exitCode = 1;
+        return;
+    }
+    await page.mouse.click(origin.left + 640, origin.top + 384, { button: "right" });
+    const dropped = Date.now() + 3_000;
+    while (state?.tool !== "none" && Date.now() < dropped) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        state = await cityStateJson();
+    }
+    // The browser fires `contextmenu` after the button events, so give it its moment.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const menus = await page.evaluate(() => window.__contextmenus ?? -1);
+    if (state?.tool !== "none") {
+        console.error("FAIL: right click: the tool stayed in hand, debug_city() said " + JSON.stringify(state));
+        process.exitCode = 1;
+    } else if (menus !== 0) {
+        console.error("FAIL: right click: the browser's context menu opened " + menus + " time(s), debug_city() said " + JSON.stringify(state));
+        process.exitCode = 1;
+    } else {
+        console.log("osiris web: right click OK (road -> none, no context menu)");
     }
 }
 
@@ -2547,6 +2613,7 @@ async function run() {
             if (MENU) {
                 await runMenuMission();
                 if (SAVES && process.exitCode !== 1) await runSaves();
+                if (RIGHTCLICK && process.exitCode !== 1) await runRightClick();
                 if (VIEWPORT && process.exitCode !== 1) await runViewportChecks();
                 return;
             }

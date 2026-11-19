@@ -102,6 +102,11 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
   `osiris web: city started and ran 2 months: 1, 2`, and
   `OSIRIS_DATA=<folder> SMOKE_MISSION=menu scripts/web-smoke.sh` prints
   `osiris web: the menu started a city that ran 2 months: 1, 2`.
+- **One right-click puts the tool down.** A right-click with a tool in hand drops it and closes
+  the sidebar menu in the same click, so a building is not placed by accident, and a
+  right-click during a drag cancels the drag only (`web-right-click`).
+  `OSIRIS_DATA=<folder> SMOKE_MISSION=menu SMOKE_RIGHTCLICK=1 scripts/web-smoke.sh` prints
+  `osiris web: right click OK (road -> none, no context menu)`.
 - **The long run, the custom map and the Mission Editor.** The same city plays 24 game months at
   the fastest speed while the page logs its frame rate every ten seconds and its wasm memory every
   month, and a custom map from `Maps/` plays six; the Mission Editor opens `Small Oasis.map`, paints

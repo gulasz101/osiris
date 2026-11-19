@@ -62,7 +62,7 @@ Game data for tests on this machine: `OSIRIS_TEST_DATA=/Users/paperclip/PharaohD
 
 ## 3. Docs and the gate
 
-- [ ] 3.1 `docs/STATUS.md`, section "2. Works": add one bullet, **One right-click puts the tool
+- [x] 3.1 `docs/STATUS.md`, section "2. Works": add one bullet, **One right-click puts the tool
       down.**, saying a right-click with a tool in hand drops it and closes the sidebar menu in
       one click, a right-click during a drag cancels the drag only, and the smoke command from 2.3.
       Check: `git diff --stat` shows only `docs/STATUS.md`.

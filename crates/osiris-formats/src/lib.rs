@@ -13,6 +13,7 @@ pub mod images;
 pub mod language;
 pub mod messages;
 pub mod model;
+pub mod pe;
 pub mod pkware;
 pub mod scenario;
 pub mod sg3;

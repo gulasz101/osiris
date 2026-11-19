@@ -6,7 +6,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
 
 ## 1. Read cursors out of the exe (`crates/osiris-formats`)
 
-- [ ] 1.1 New file `crates/osiris-formats/src/pe.rs` with
+- [x] 1.1 New file `crates/osiris-formats/src/pe.rs` with
       `pub fn resource(exe: &[u8], kind: u32, id: u32) -> Option<&[u8]>`, exactly as design
       section 1, and `pub mod pe;` in `lib.rs`. Use checked reads (`get(..)?`), no panics.
       Check: `cargo test -p osiris-formats --quiet` passes.

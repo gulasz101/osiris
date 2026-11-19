@@ -53,7 +53,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       Check: both commands from 2.2 pass.
 - [x] 2.4 `main.rs`: set the cursor in `RedrawRequested` when the kind changes (design section 4).
       Check: both commands from 2.2 pass.
-- [ ] 2.5 Browser only: add `"cursor"` to the `debug_city()` JSON (design section 4). Update the
+- [x] 2.5 Browser only: add `"cursor"` to the `debug_city()` JSON (design section 4). Update the
       example JSON in the doc comment of `debug_city` in `web.rs`.
       Check: both commands from 2.2 pass.
 

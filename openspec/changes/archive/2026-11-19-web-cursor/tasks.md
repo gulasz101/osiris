@@ -77,5 +77,5 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       `Pharaoh.exe`; no exe, system cursor; the smoke command from 3.2. Under "3. Missing or
       different from desktop" nothing changes (the desktop gets the same cursors).
       Check: `git diff --stat` shows only `docs/STATUS.md`.
-- [ ] 3.4 `scripts/check.sh` ends with `CHECK OK`, then `scripts/openspec archive web-cursor -y`,
+- [x] 3.4 `scripts/check.sh` ends with `CHECK OK`, then `scripts/openspec archive web-cursor -y`,
       commit and push.

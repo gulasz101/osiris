@@ -19,7 +19,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       `resource(&tiny_pe(1, 7, b"abc"), 1, 7) == Some(&b"abc"[..])`, a wrong id gives `None`,
       a wrong kind gives `None`, and a 10-byte buffer gives `None`.
       Check: `cargo test -p osiris-formats pe --quiet` shows 4 passed.
-- [ ] 1.3 New file `crates/osiris-formats/src/cursor.rs` with `CursorImage`, `decode` and
+- [x] 1.3 New file `crates/osiris-formats/src/cursor.rs` with `CursorImage`, `decode` and
       `from_exe`, as design section 2, and `pub mod cursor;` in `lib.rs`. Unit tests with bytes
       made in the test: an 8x2 1-bit cursor (height field 4, palette black then white, colour
       rows `0xF0` and `0x0F` bottom-up, mask rows `0x00` and `0xFF` bottom-up, hotspot 3,1;

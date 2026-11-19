@@ -38,7 +38,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
 
 ## 2. Show them (`crates/osiris-app`)
 
-- [ ] 2.1 New file `crates/osiris-app/src/cursor.rs` with `CursorKind` and
+- [x] 2.1 New file `crates/osiris-app/src/cursor.rs` with `CursorKind` and
       `pub fn kind_for(tool: Tool, commanding: bool) -> CursorKind` (design section 3), and
       `mod cursor;` in `main.rs`. Unit tests: `(Tool::None, false)` -> Arrow,
       `(Tool::Clear, false)` -> Shovel, `(Tool::Road, false)` -> Arrow, `(Tool::Build(1), false)`

@@ -17,6 +17,7 @@ mod popup;
 mod army_view;
 mod city_sounds;
 mod city_view;
+mod cursor;
 mod data_dir;
 mod disaster_view;
 mod editor;

@@ -1775,6 +1775,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 self.redraw();
+                self.update_cursor();
                 if let Some(r) = self.drawn_request.take() {
                     self.menu_request(r, event_loop);
                 }
@@ -1785,6 +1786,25 @@ impl ApplicationHandler for App {
 }
 
 impl App {
+    /// Shows the game's cursor for the current screen and city state, when it changed. Called
+    /// from the redraw and not from the mouse handlers: winit's web backend panics with
+    /// "RefCell already borrowed" when a cursor is set from inside an event.
+    fn update_cursor(&mut self) {
+        let kind = match &self.screen {
+            Some(Screen::Playing(game, _)) => cursor::kind_for(
+                game.tool,
+                game.selected_company.is_some() || game.selected_ship.is_some(),
+            ),
+            _ => cursor::CursorKind::Arrow,
+        };
+        if Some(kind) == self.cursor_kind {
+            return;
+        }
+        let (Some(gfx), Some(cursors)) = (&self.gfx, &self.cursors) else { return };
+        gfx.window.set_cursor(cursors.get(kind).clone());
+        self.cursor_kind = Some(kind);
+    }
+
     /// What happens after graphics are ready: start the right screen.
     fn finish_start(&mut self, _event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]

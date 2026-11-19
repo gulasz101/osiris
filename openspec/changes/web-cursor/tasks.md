@@ -59,7 +59,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
 
 ## 3. Smoke and docs
 
-- [ ] 3.1 In `web/tests/smoke.mjs`, add `SMOKE_CURSOR=1` (read it like `SMOKE_VIEWPORT`, runs with
+- [x] 3.1 In `web/tests/smoke.mjs`, add `SMOKE_CURSOR=1` (read it like `SMOKE_VIEWPORT`, runs with
       `SMOKE_MISSION=menu` only) and pass it through in `scripts/web-smoke.sh`. The flow, after
       the city has started: poll up to 3 s until `debug_city()` has `"cursor":"arrow"` and
       `getComputedStyle(canvas).cursor` starts with `url(`; click the sidebar's Clear Land button

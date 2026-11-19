@@ -34,6 +34,12 @@ fi
 if [ -n "${SMOKE_RIGHTCLICK:-}" ]; then
     TIMEOUT=600
 fi
+# A cursor run walks the menu to a city, reads the arrow, picks Clear Land for the shovel and
+# right-clicks the city view for the arrow back; it is a mission run, so it gets the mission
+# timeout.
+if [ -n "${SMOKE_CURSOR:-}" ]; then
+    TIMEOUT=600
+fi
 # A soak run plays 24 months of a city, then a custom map and the editor.
 if [ -n "${SMOKE_SOAK:-}" ]; then
     TIMEOUT=1800

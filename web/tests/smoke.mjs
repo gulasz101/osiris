@@ -133,6 +133,19 @@ if (RIGHTCLICK && !MENU) {
     console.error("FAIL: SMOKE_RIGHTCLICK runs with SMOKE_MISSION=menu");
     process.exit(1);
 }
+// `SMOKE_CURSOR=1` reads the game's own cursors (web-cursor): the arrow when the city stands
+// idle, the shovel once the sidebar's Clear Land is in hand, and the arrow again after a right
+// click puts the tool down. It runs with `SMOKE_MISSION=menu` only, like `SMOKE_VIEWPORT`.
+const CURSOR_RAW = (process.env.SMOKE_CURSOR ?? "").trim();
+const CURSOR = CURSOR_RAW === "1";
+if (CURSOR_RAW !== "" && !CURSOR) {
+    console.error("FAIL: SMOKE_CURSOR must be 1 or unset (got " + CURSOR_RAW + ")");
+    process.exit(1);
+}
+if (CURSOR && !MENU) {
+    console.error("FAIL: SMOKE_CURSOR runs with SMOKE_MISSION=menu");
+    process.exit(1);
+}
 // `1` hands the staged files to the page's own folder picker, so the page's reading path
 // (its progress bar and its read time) is what runs, and then goes on with the ordinary
 // checks. `design.md` records the numbers this mode measured.
@@ -885,6 +898,72 @@ async function runRightClick() {
     } else {
         console.log("osiris web: right click OK (road -> none, no context menu)");
     }
+}
+
+/** The canvas's CSS cursor, which is a `url(...)` image once the game sets its own. */
+async function canvasCursor() {
+    return page.evaluate(() => getComputedStyle(document.getElementById("osiris")).cursor);
+}
+
+/** What the city says its cursor is, and what the canvas actually wears. */
+async function cursorState() {
+    const state = await cityStateJson();
+    return { kind: state?.cursor ?? null, css: await canvasCursor() };
+}
+
+/** Waits up to `ms` for the city and the canvas to both show `kind`'s game cursor. */
+async function waitCursor(kind, ms = 3_000) {
+    const deadline = Date.now() + ms;
+    let last = await cursorState();
+    while (Date.now() < deadline) {
+        if (last.kind === kind && last.css.startsWith("url(")) return last;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        last = await cursorState();
+    }
+    return last;
+}
+
+/**
+ * SMOKE_CURSOR=1: the game's own cursors (web-cursor). An idle city wears the arrow: `debug_city()`
+ * says `"cursor":"arrow"` and the canvas's CSS cursor is a `url(...)` image, not the system
+ * pointer. The sidebar's Clear Land button sits 9 from the panel's left edge and 381 below the
+ * screen top, 34 by 49 (`sidebar.rs`'s full panel), so clicking its centre puts the shovel in
+ * hand. A right click on the city view drops the tool and the arrow comes back.
+ */
+async function runCursor() {
+    // A message or a briefing would take the first click, so let the city stand idle first.
+    const settled = await settleCity();
+    if (!settled.ok) {
+        console.error("FAIL: cursor: the city never became idle, debug_city() said " + (await cityState()));
+        process.exitCode = 1;
+        return;
+    }
+    const arrow = await waitCursor("arrow");
+    if (arrow.kind !== "arrow" || !arrow.css.startsWith("url(")) {
+        console.error("FAIL: cursor: the idle city did not wear the arrow, read " + JSON.stringify(arrow));
+        process.exitCode = 1;
+        return;
+    }
+    const origin = await canvasOrigin();
+    const screen = await page.evaluate(() => {
+        const canvas = document.getElementById("osiris");
+        return { width: canvas.width, height: canvas.height };
+    });
+    await page.mouse.click(origin.left + screen.width - 186 + 9 + 34 / 2, origin.top + 381 + 49 / 2);
+    const shovel = await waitCursor("shovel");
+    if (shovel.kind !== "shovel" || !shovel.css.startsWith("url(") || shovel.css === arrow.css) {
+        console.error("FAIL: cursor: Clear Land did not put the shovel on the canvas, read " + JSON.stringify(shovel));
+        process.exitCode = 1;
+        return;
+    }
+    await page.mouse.click(origin.left + 640, origin.top + 384, { button: "right" });
+    const back = await waitCursor("arrow");
+    if (back.kind !== "arrow" || !back.css.startsWith("url(")) {
+        console.error("FAIL: cursor: the arrow did not come back after the right click, read " + JSON.stringify(back));
+        process.exitCode = 1;
+        return;
+    }
+    console.log("osiris web: cursor OK (arrow -> shovel -> arrow)");
 }
 
 /**
@@ -2614,6 +2693,7 @@ async function run() {
                 await runMenuMission();
                 if (SAVES && process.exitCode !== 1) await runSaves();
                 if (RIGHTCLICK && process.exitCode !== 1) await runRightClick();
+                if (CURSOR && process.exitCode !== 1) await runCursor();
                 if (VIEWPORT && process.exitCode !== 1) await runViewportChecks();
                 return;
             }

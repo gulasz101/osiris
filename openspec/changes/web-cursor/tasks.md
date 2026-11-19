@@ -69,7 +69,7 @@ Game data on this machine: `/Users/paperclip/PharaohData/Akhenaten/resources` (i
       until `"cursor":"arrow"`. Print `osiris web: cursor OK (arrow -> shovel -> arrow)` or
       `FAIL: cursor ...` with what it read, and exit 1.
       Check: `node --check web/tests/smoke.mjs` and `bash -n scripts/web-smoke.sh` pass.
-- [ ] 3.2 Run it: `OSIRIS_DATA=/Users/paperclip/PharaohData/Akhenaten/resources SMOKE_MISSION=menu SMOKE_CURSOR=1 timeout 600 scripts/web-smoke.sh`.
+- [x] 3.2 Run it: `OSIRIS_DATA=/Users/paperclip/PharaohData/Akhenaten/resources SMOKE_MISSION=menu SMOKE_CURSOR=1 timeout 600 scripts/web-smoke.sh`.
       Check: the output has `osiris web: cursor OK`. If it fails, do not change the design:
       commit what works, put the exact `FAIL` line in the issue comment and set it `blocked`.
 - [ ] 3.3 `docs/STATUS.md`, section "2. Works": one bullet, **The game's own cursors.**: the

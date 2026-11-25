@@ -10,27 +10,28 @@ Read this whole file at the start of every run. It is short on purpose.
   looks. Change only what the browser needs.
 - The desktop build must keep working. Every change keeps `cargo test --workspace` green.
 
-## How we work (dark room)
-- Work on branch `main` only. No other branches, no pull requests. Commit and push to `main`.
-- Start of every run:
-  1. `git checkout main && git pull --ff-only`
-  2. Read your Paperclip issue. It names one OpenSpec change, for example `web-compiles`.
+## How we work (code factory)
+- All work comes as a code factory work order (homelab-2nd `agents/factory/ENGINE.md`). One
+  OpenSpec change is one work order. The owner accepts its spec, then the factory engine runs it
+  in its own git worktree, on its own branch: red (tests) -> green (code) -> review -> verify ->
+  pull request. The engine commits, pushes and opens the pull request. It merges the pull request
+  as the `gulasz101-factory` App when CI `check` is green and no never-path is touched.
+- `main` takes pull requests only. Never push to `main`, never open a pull request yourself.
+- Start of every stage:
+  1. Stay in the worktree your prompt names. Never `git checkout` another branch.
+  2. Read your stage prompt and the spec. They name the OpenSpec change, for example `web-compiles`.
   3. `scripts/openspec instructions apply --change <name> --json`: it lists the tasks and which are
      done. Read `openspec/changes/<name>/proposal.md`, `design.md` (if there is one) and `tasks.md`.
-  4. Search Hindsight (bank `coding-agent::osiris`) and docs-mcp for what the next task touches.
-- Then do the **first unchecked task** in `tasks.md`, and only that one:
-  1. Make the change. Look up every library call in docs-mcp first (table below).
-  2. Run the check the task names (or `scripts/check.sh`).
-  3. Tick it in `tasks.md` (`- [ ]` -> `- [x]`).
-  4. `git add -A && git commit -m "<change>: <task number> <what you did>" && git push`
-  5. Next task. Small commits matter: a run can stop at any time (turn cap, timeout), and the next
-     run continues from `tasks.md`.
-- When every task is ticked:
-  1. `scripts/check.sh` must end with `CHECK OK`.
-  2. `scripts/openspec archive <name> -y`, then commit and push.
-  3. Comment on the issue and set it `done` (your Paperclip instructions say how).
-- If a task is wrong or impossible: do not invent another design. Commit what works (the check
-  must still pass), write what is missing and why in an issue comment, set the issue `blocked`.
+  4. Search Hindsight (bank `coding-agent::osiris`) and docs-mcp for what the work touches.
+- Red writes tests only, under a `tests/` folder (`crates/<crate>/tests/`, `web/tests/`). The
+  factory counts only those as tests: a `#[cfg(test)]` module inside `src/` is code, not a test.
+- Green makes the change, ticks the tasks it finished in `tasks.md` (`- [ ]` -> `- [x]`), and runs
+  `scripts/check.sh` until it ends with `CHECK OK`. Look up every library call in docs-mcp first
+  (table below). Do not commit and do not push: the engine checks the worktree and commits.
+- The last work order of a change also runs `scripts/openspec archive <name> -y`. The spec says so.
+- If a task is wrong or impossible: do not invent another design. Say what is missing and why in
+  your stage hand-in. The engine's stall ladder takes it from there.
+- Never-paths (`.github/never-paths.json`): only the owner merges a change to them.
 
 ## Docs first (docs-mcp), then Firecrawl
 **Rule: when you are not sure, look it up. Do not assume.** This is not only for new code. It is
@@ -111,7 +112,6 @@ which docs you used.
 - No interactive commands (`git rebase -i`, `git add -p`, editors).
 
 ## When you are stuck
-- Same error three times: stop. Commit what works, comment the exact error and what you tried,
-  set the issue `blocked`.
+- Same error three times: stop. Hand in with the exact error and what you tried. Do not commit.
 - Learned something durable (a wasm gotcha, an API that differs from what you expected)? Retain it
   in Hindsight with `hindsight_ingest_document`.

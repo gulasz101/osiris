@@ -1,0 +1,10 @@
+# The owner reviews every change to the code factory's never-paths
+# (.github/never-paths.json). The ruleset on main requires code-owner review, so the
+# gulasz101-factory App cannot merge these by itself.
+/.github/                   @gulasz101
+AGENTS.md                   @gulasz101
+CLAUDE.md                   @gulasz101
+/LICENSE                    @gulasz101
+/scripts/no-game-files.sh   @gulasz101
+/scripts/check-site.sh      @gulasz101
+/scripts/no-direct-fs.sh    @gulasz101

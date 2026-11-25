@@ -1,0 +1,16 @@
+{
+  "comment": "Paths a code factory work order may never touch, whatever any gate says (homelab-2nd agents/factory/CONTRACT.md point 5, GUL-2238). The engine reads this file from the pull request's base commit. Only the owner merges a change to these paths. The game-file guards keep game data out of git (AGENTS.md, Game files).",
+  "globs": [
+    ".github/**",
+    "**/AGENTS.md",
+    "**/CLAUDE.md",
+    "LICENSE",
+    "scripts/no-game-files.sh",
+    "scripts/check-site.sh",
+    "scripts/no-direct-fs.sh",
+    "PharaohData/**",
+    "web/game-data-staging/**"
+  ],
+  "newFilesUnder": [],
+  "contentRules": {}
+}

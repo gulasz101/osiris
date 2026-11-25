@@ -1,12 +1,10 @@
 #!/bin/sh
-# The gate for every change: branch, game files, tests, wasm build, openspec.
+# The gate for every change: game files, tests, wasm build, openspec.
+# Runs on any branch: the code factory runs it in each work order's worktree, and CI
+# runs it on every pull request (.github/workflows/check.yml).
 # Usage: scripts/check.sh
 set -eu
 cd "$(dirname "$0")/.." || exit 1
-
-echo "== branch"
-branch=$(git rev-parse --abbrev-ref HEAD)
-[ "$branch" = "main" ] || { echo "work on main only (AGENTS.md)"; exit 1; }
 
 echo "== no-game-files"
 scripts/no-game-files.sh

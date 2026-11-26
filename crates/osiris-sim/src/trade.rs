@@ -541,11 +541,24 @@ impl World {
         }
     }
 
+    /// Why the Kingdom's trade is closed to the city, or `None` while it trades. The
+    /// tutorial campaigns keep it closed until the mission's own beat opens it (see
+    /// `Mission::trade_closed`); a custom scenario has no campaign mission and trades
+    /// from the first day. The reason is player-facing: the Kingdom map still opens
+    /// and shows it.
+    pub fn trade_closed_reason(&self) -> Option<&'static str> {
+        self.mission.as_ref().filter(|m| m.trade_closed).map(|_| "This city does not trade with you")
+    }
+
     /// Opens the trade route to `city`, paying its cost as construction. As in the
     /// original, only a treasury 5000 or more in debt stops it; otherwise the cost is
-    /// paid even into debt.
+    /// paid even into debt. A mission that keeps the Kingdom's trade closed refuses
+    /// first, spending nothing.
     pub fn open_trade_route(&mut self, city: usize) -> Result<(), &'static str> {
         let Some(c) = self.trade.cities.get(city) else { return Err("No such city") };
+        if let Some(reason) = self.trade_closed_reason() {
+            return Err(reason);
+        }
         if !c.trades() || c.open {
             return Err("This city does not trade with you");
         }

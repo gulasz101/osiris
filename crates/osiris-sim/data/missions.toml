@@ -25,6 +25,9 @@
 #                   and loan by 200/100/100/100/75%, see difficulty.rs)
 #                   player_rank = int, religion_enabled = bool?, hide_won_screen = bool?,
 #                   enable_scenario_events = bool?, start_message = "key"? }
+#   trade_closed = true?  the mission starts with the Kingdom's trade closed, as the
+#                 tutorials do (the source's city.set_empire_available(0) at start); an
+#                 unlock carrying opens_trade opens it later. Absent means trade is open.
 #   env         = { has_animals, gods_least_mood, hide_nilometer, flotsam_enabled, ... }
 #                 scalars as present in the source `env {}` block (default_marshland_grow /
 #                 default_tree_grow references are shared engine defaults, not per-mission
@@ -38,9 +41,10 @@
 #   vars        = { name = value, ... } scalar values from the source `vars {}` block
 #                 (booleans/ints only; the `goal_tooltip` function is UI text logic, omitted).
 #   unlocks     = [ { when = "<condition>", enable = ["building_key", ...], advisors = [...]?,
-#                     message = "message_key"? }, ... ] — progressive/tutorial building & advisor
-#                 gating the source script implements via city.use_building(...)/
-#                 set_advisor_available(...) in its event handlers. Most missions place their
+#                     opens_trade = true?, message = "message_key"? }, ... ] — progressive/tutorial
+#                 building & advisor gating the source script implements via city.use_building(...)/
+#                 set_advisor_available(...) in its event handlers, and `opens_trade` for the beat
+#                 that calls city.set_empire_available(1). Most missions place their
 #                 whole roster in `buildings` at start and gate nothing further, so `unlocks` is
 #                 omitted for them (see MISSIONS_NOTES.md for which missions do gate).
 #   messages    = [ { key = "message_key", trigger = "short description" }, ... ] popups the
@@ -66,6 +70,7 @@
 id = 0
 key = "m_000_nubt"
 name = "Nubt"
+trade_closed = true
 buildings = ["house_crude_hut", "road"]
 # BUILDING_CLEAR_LAND has no buildings.toml key (terrain tool, id 9); omitted from the list above.
 
@@ -157,6 +162,7 @@ trigger = "resource_stored:gamemeat >= 400"
 id = 1
 key = "m_001_thinis"
 name = "Thinis"
+trade_closed = true
 buildings = [
   "house_crude_hut", "road", "architect_post", "firehouse", "police_station", "bazaar",
   "granary", "water_supply", "gold_mine", "village_palace", "hunting_lodge",
@@ -227,6 +233,7 @@ trigger = "building_built:temple_bast"
 id = 2
 key = "m_002_perwadjyt"
 name = "Perwadjyt"
+trade_closed = true
 buildings = [
   "firehouse", "architect_post", "police_station", "village_palace", "water_supply",
   "figs_farm", "work_camp", "booth", "juggler_school", "bazaar", "granary",
@@ -314,6 +321,7 @@ trigger = "disease"
 id = 3
 key = "m_003_nekhen"
 name = "Nekhen"
+trade_closed = true
 buildings = [
   "roadblock", "firehouse", "architect_post", "police_station", "village_palace",
   "water_supply", "apothecary", "physician", "grain_farm", "barley_farm", "work_camp",
@@ -376,6 +384,7 @@ trigger = "resource_stored:beer >= 300"
 id = 4
 key = "m_004_mennefer"
 name = "Mennefer"
+trade_closed = true
 notes = "Runs four scripted Pharaoh-favour resource requests on a fixed calendar (beer @ y6m8, papyrus @ y8m10, barley @ y10m5, pottery @ y15m4; mission4_pharaoh_request_* handlers) that affect reputation/demand via create_good_request/create_chain_event. These do not gate any building or advisor and are not modeled in this data file."
 buildings = [
   "small_statue", "medium_statue", "large_statue", "gardens", "plaza",
@@ -450,9 +459,10 @@ notes = "count_total_buildings(BUILDING_HOUSE_SPACIOUS_APARTMENT) >= mission.spa
 [[mission.unlocks]]
 when = "resource_stored:papyrus >= 100"
 enable = ["dock"]
+opens_trade = true
 advisors = ["ADVISOR_TRADE"]
 message = "message_tutorial_trade_with_other_cities"
-notes = "Storage-yard papyrus amount >= mission.papyrus_stored (100), from event_warehouse_filled. Also flips city.set_empire_available(1), opening the empire/trade map (not modeled as a building unlock here)."
+notes = "Storage-yard papyrus amount >= mission.papyrus_stored (100), from event_warehouse_filled. Also flips city.set_empire_available(1) — the opens_trade flag — opening the Kingdom map's trade."
 
 [[mission.unlocks]]
 when = "resource_stored:bricks >= 100"

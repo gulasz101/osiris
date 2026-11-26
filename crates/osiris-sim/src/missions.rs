@@ -19,6 +19,9 @@ struct RawMission {
     win: toml::Table,
     #[serde(default)]
     vars: toml::Table,
+    /// The mission starts with the Kingdom's trade closed, as the tutorials do.
+    #[serde(default)]
+    trade_closed: bool,
     #[serde(default)]
     unlocks: Vec<RawUnlock>,
 }
@@ -28,6 +31,9 @@ struct RawUnlock {
     when: String,
     #[serde(default)]
     enable: Vec<String>,
+    /// Meeting this opens the Kingdom's trade to the city.
+    #[serde(default)]
+    opens_trade: bool,
     #[serde(default)]
     message: Option<String>,
 }
@@ -57,6 +63,9 @@ pub enum Condition {
 pub struct Unlock {
     pub when: Condition,
     pub enable: Vec<u16>,
+    /// Meeting this opens the Kingdom's trade, not just the buildings it enables.
+    #[serde(default)]
+    pub opens_trade: bool,
     pub message: Option<String>,
     pub done: bool,
 }
@@ -87,6 +96,9 @@ pub struct Mission {
     pub unlocks: Vec<Unlock>,
     pub goals: Goals,
     pub population_cap: Option<i32>,
+    /// The Kingdom's trade is closed until the mission's own beat opens it.
+    #[serde(default)]
+    pub trade_closed: bool,
     pub start_message: Option<String>,
     pub religion_enabled: bool,
     /// The rank Pharaoh has given the governor, which sets the salary he may draw.
@@ -195,6 +207,7 @@ impl World {
             .map(|u| Unlock {
                 when: self.parse_condition(&u.when),
                 enable: u.enable.iter().filter_map(|k| self.building_kind(k)).collect(),
+                opens_trade: u.opens_trade,
                 message: u.message.clone(),
                 done: false,
             })
@@ -214,6 +227,7 @@ impl World {
                 kingdom: goal(&raw.win, "kingdom"),
             },
             population_cap: raw.vars.get("population_cap").and_then(|v| v.as_integer()).map(|v| v as i32),
+            trade_closed: raw.trade_closed,
             start_message: raw.funds.get("start_message").and_then(|v| v.as_str()).map(str::to_owned),
             religion_enabled: raw.funds.get("religion_enabled").and_then(|v| v.as_bool()).unwrap_or(true),
             player_rank: raw.funds.get("player_rank").and_then(|v| v.as_integer()).unwrap_or(0) as u8,
@@ -293,6 +307,9 @@ impl World {
             if self.condition_met(&u.when) {
                 u.done = true;
                 m.allowed.extend(u.enable.iter().copied());
+                if u.opens_trade {
+                    m.trade_closed = false;
+                }
                 if let Some(msg) = &u.message {
                     self.messages.push_back(msg.clone());
                 }

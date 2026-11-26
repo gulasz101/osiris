@@ -12,8 +12,11 @@
 //! group 47 and city names from group 195.
 //!
 //! Opening a route asks first, in the original's yes/no window (text group 5), and
-//! then shows the window saying the route is open (group 142).
+//! then shows the window saying the route is open (group 142). A mission that keeps
+//! the Kingdom's trade closed (the tutorials) still opens the map and its cities;
+//! the panel says why no route can be opened instead of offering the price.
 
+use crate::lang::tr;
 use osiris_formats::empire::{city, object};
 use osiris_formats::{ImageLibrary, TextTable};
 use osiris_render::{Renderer, Space, WHITE};
@@ -363,6 +366,11 @@ impl EmpireWindow {
             && Self::inside(Self::open_button(screen), p)
             && world.trade.cities.get(c).is_some_and(|c| c.trades() && !c.open)
         {
+            // A mission that keeps the Kingdom's trade closed offers nothing to
+            // accept: the panel already says why.
+            if world.trade_closed_reason().is_some() {
+                return EmpireClick::Nothing;
+            }
             // The original asks before paying, unless the treasury is 5000 or more in
             // debt; short of that the route opens even into debt.
             self.popup = Some(if world.out_of_money() { EmpirePopup::NoMoney } else { EmpirePopup::Confirm(c) });
@@ -661,6 +669,12 @@ impl EmpireWindow {
                 tier_badge(r, res, x + 13.0, sh - 58.0);
             }
             let b = Self::open_button(screen);
+            if let Some(reason) = world.trade_closed_reason() {
+                // Trade the mission keeps closed: the Kingdom map still shows the
+                // city and its goods, and this line says why no route opens.
+                centre(r, Font::NormalBlackOnLight, tr(reason), sh - 35.0);
+                return;
+            }
             panel::button_border(r, panels, b[0], b[1], b[2] as i32, b[3] as i32, Self::inside(b, self.cursor));
             // "300 Deben to open land trade route": the cost after a blank sign slot,
             // then the unit, each followed by a blank.

@@ -5,7 +5,7 @@
 //! 32 days, may spread fire with the wind, then turn to rubble.
 
 use crate::buildings::{Building, BuildingId, kind};
-use crate::figures::Travel;
+use crate::figures::{FigureId, Travel};
 use crate::map::{NEIGHBOURS, terrain};
 use crate::people::figure_kind::HOMELESS;
 use crate::missions::Condition;
@@ -14,6 +14,9 @@ use crate::world::World;
 const THRESHOLD: i32 = 1000;
 /// A burning ruin starts 1-8 days old and is rubble at this age.
 const RUIN_AGE: i32 = 33;
+/// Tiles from his firehouse that a fireman goes to put a fire out in: the house
+/// covers the ground within this of its own tile, so a fire past it keeps burning.
+pub const FIRE_REACH: i32 = 25;
 /// Monuments and tombs fire never spreads to.
 const FIRE_SPREAD_EXEMPT: [u16; 17] = [183, 207, 210, 213, 215, 218, 219, 220, 222, 225, 227, 228, 229, 230, 234, 235, 236];
 
@@ -135,6 +138,41 @@ impl World {
                 self.make_rubble(x, y);
             }
         }
+    }
+
+    /// The nearest burning ruin within the reach of the firehouse at `home` that no
+    /// other fireman is already going to, with the road tile beside it to walk to.
+    /// The first nearest on a tie.
+    pub(crate) fn fire_within(&self, home: BuildingId, fireman: FigureId) -> Option<(BuildingId, (i32, i32))> {
+        let house = self.buildings.get(home)?;
+        let (hx, hy) = (house.x, house.y);
+        let claimed: Vec<BuildingId> = self
+            .figures
+            .iter()
+            .filter(|f| f.kind == crate::services::figure_kind::FIREMAN && f.id != fireman && !f.dead)
+            .map(|f| f.target)
+            .collect();
+        self.buildings
+            .iter()
+            .filter(|b| b.kind == kind::BURNING_RUIN && !claimed.contains(&b.id))
+            .filter_map(|b| {
+                let d = (b.x - hx).abs().max((b.y - hy).abs());
+                (d <= FIRE_REACH).then_some((d, b.id, b.road?))
+            })
+            .min_by_key(|&(d, id, _)| (d, id))
+            .map(|(_, id, road)| (id, road))
+    }
+
+    /// Puts out a burning ruin a fireman has reached: it goes out and leaves rubble.
+    pub(crate) fn extinguish(&mut self, id: BuildingId) {
+        let Some(b) = self.buildings.get(id) else { return };
+        if b.kind != kind::BURNING_RUIN {
+            return;
+        }
+        let (x, y) = (b.x, b.y);
+        self.demolish(id);
+        self.make_rubble(x, y);
+        self.fx(crate::effects::Fx::Sound(crate::effects::FIRE));
     }
 
     fn make_rubble(&mut self, x: i32, y: i32) {

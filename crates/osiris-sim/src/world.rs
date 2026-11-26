@@ -627,7 +627,7 @@ impl World {
                 let t = self.map.terrain.at_or(x, y, 0);
                 if t & terrain::BUILDING != 0 {
                     let id = self.map.building.at_or(x, y, 0);
-                    if id != 0 && !doomed.contains(&id) {
+                    if id != 0 && self.can_clear(x, y) && !doomed.contains(&id) {
                         doomed.push(id);
                         items += 1;
                     }
@@ -686,6 +686,20 @@ impl World {
         rules.roads_in(map, x0 - 1, y0 - 1, x0 + radius - 2, y0 + radius - 2);
         self.ditch_images_in(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
         Outcome::Done { items, cost }
+    }
+
+    /// Whether Clear Land may take the tile at `(x, y)`. The original's clear tool leaves
+    /// a burning ruin standing, so it is never demolished and never counted (fire bug B,
+    /// GUL-2270).
+    pub fn can_clear(&self, x: i32, y: i32) -> bool {
+        if !self.map.contains(x, y) {
+            return false;
+        }
+        let id = self.map.building.at_or(x, y, 0);
+        if id == 0 {
+            return true;
+        }
+        !self.buildings.get(id).is_some_and(|b| b.kind == crate::buildings::kind::BURNING_RUIN)
     }
 
     /// Redraws land freed in play the way the original does (see

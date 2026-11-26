@@ -35,6 +35,8 @@ const SERVICE_RADIUS: i32 = 2;
 pub(crate) mod action {
     pub const ROAMING: u16 = 1;
     pub const RETURNING: u16 = 2;
+    /// Walking to a burning ruin to put it out.
+    pub const FIRE_FIGHTING: u16 = 3;
 }
 
 /// Building kinds whose tiles roamers won't step onto.
@@ -520,6 +522,69 @@ impl World {
         (0..8).step_by(2).find(|&d| roads[d] && Some(d) != came_from).map(|d| d as u8)
     }
 
+    /// Points a fireman at the nearest burning ruin his firehouse covers that no other
+    /// fireman is going to, if there is one. Says whether he set off.
+    fn send_to_fire(&mut self, fid: FigureId) -> bool {
+        let Some(f) = self.figures.get(fid) else { return false };
+        let home = f.home;
+        let Some((ruin, road)) = self.fire_within(home, fid) else { return false };
+        let map = &self.map;
+        let f = self.figures.get_mut(fid).expect("present");
+        if !f.go_to(map, road) {
+            return false;
+        }
+        f.target = ruin;
+        f.action = action::FIRE_FIGHTING;
+        f.roam_out = false;
+        true
+    }
+
+    /// A fireman walking to a burning ruin: he puts it out on reaching the road beside
+    /// it. When the fire is out already, or he can find no way there, he goes back to
+    /// his rounds rather than standing on it.
+    fn fight_fire(&mut self, fid: FigureId) {
+        let Some(f) = self.figures.get(fid) else { return };
+        let (ruin, x, y, moving) = (f.target, f.x, f.y, f.moving);
+        let Some(b) = self.buildings.get(ruin).filter(|b| b.kind == kind::BURNING_RUIN) else {
+            return self.leave_fire(fid);
+        };
+        let (rx, ry) = (b.x, b.y);
+        if !moving && (rx - x).abs() <= SERVICE_RADIUS && (ry - y).abs() <= SERVICE_RADIUS {
+            self.extinguish(ruin);
+            return self.leave_fire(fid);
+        }
+        // Arrived at the road he was sent to but not beside the fire: try another road
+        // beside it, or give the fire up to another walker.
+        if !moving && self.figures.get(fid).is_some_and(|f| f.route.is_empty() && f.destination == Some((x, y))) {
+            let alt = crate::buildings::road_within(&self.map, rx, ry, 1, SERVICE_RADIUS).filter(|&t| t != (x, y));
+            let map = &self.map;
+            let f = self.figures.get_mut(fid).expect("present");
+            if !alt.is_some_and(|t| f.go_to(map, t)) {
+                self.leave_fire(fid);
+            }
+            return;
+        }
+        let map = &self.map;
+        let f = self.figures.get_mut(fid).expect("present");
+        if matches!(f.walk(map), Step::Blocked | Step::Lost) {
+            self.leave_fire(fid);
+        }
+    }
+
+    /// Back to his rounds after a fire: a fireman who has put one out does not stand
+    /// on the ashes, and one whose fire went out without him goes on roaming too.
+    fn leave_fire(&mut self, fid: FigureId) {
+        let roam = self.max_roam(figure_kind::FIREMAN);
+        let Some(f) = self.figures.get_mut(fid) else { return };
+        f.target = 0;
+        f.action = action::ROAMING;
+        f.roam_left = roam;
+        f.roam_out = false;
+        f.roam_wait = -1;
+        f.route.clear();
+        f.destination = None;
+    }
+
     /// What a constable at `at` goes after (FUN_0048e820), when there are invaders
     /// on the field: of the invaders and wild beasts no other constable is after,
     /// those whose distance, the longer of its two parts, comes to less than 30
@@ -702,6 +767,9 @@ impl World {
                 let (x, y, at_centre) = self.figures.get(fid).map(|f| (f.x, f.y, !f.moving)).unwrap_or_default();
                 if at_centre {
                     self.provide_service(kind, home, x, y);
+                    if kind == figure_kind::FIREMAN && self.send_to_fire(fid) {
+                        return;
+                    }
                     match self.roam_direction(fid) {
                         Some(d) => {
                             let f = self.figures.get_mut(fid).expect("present");
@@ -722,6 +790,7 @@ impl World {
                     f.route.clear();
                 }
             }
+            action::FIRE_FIGHTING => self.fight_fire(fid),
             _ => {
                 // Walking home, he still serves at each tile.
                 let (x, y, moving) = self.figures.get(fid).map(|f| (f.x, f.y, f.moving)).unwrap_or_default();

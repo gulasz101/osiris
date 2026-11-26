@@ -236,9 +236,11 @@ and reads the page's console. Add `OSIRIS_DATA=<your Pharaoh folder>` to give it
 
 ## 4. Checks
 
-- `scripts/check.sh` runs the branch check, `scripts/no-game-files.sh`, `scripts/no-direct-fs.sh`,
-  the `check-site.sh` self-test, `cargo test --workspace`, the wasm compile check and
-  `scripts/openspec validate --all --strict`, and ends with `CHECK OK`.
+- `scripts/check.sh` runs on any branch: the code factory runs it in each work order's worktree,
+  and CI runs it on every pull request (`.github/workflows/check.yml`). It runs
+  `scripts/no-game-files.sh`, `scripts/no-direct-fs.sh`, the `check-site.sh` self-test,
+  `cargo test --workspace`, the wasm compile check and `scripts/openspec validate --all --strict`,
+  and ends with `CHECK OK`.
 - `scripts/web-smoke.sh` builds the page and runs the browser smoke test. Its modes are the
   environment variables `OSIRIS_DATA` (game files), `SMOKE_MISSION=direct|menu`, `SMOKE_MOVIE=intro`,
   `SMOKE_ROOT` and `SMOKE_BASE` (serve another copy of the page, for example `out/site` under
